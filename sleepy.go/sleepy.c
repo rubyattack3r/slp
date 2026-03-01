@@ -1860,6 +1860,18 @@ bool sleepy_ast_get_bool(SleepyASTNode *node) {
   return false;
 }
 
+const char *sleepy_ast_get_env_bridge_id(SleepyASTNode *node) {
+  if (node && node->type == SLEEPY_AST_ENV_BRIDGE)
+    return node->as.env_bridge.identifier;
+  return NULL;
+}
+
+const char *sleepy_ast_get_env_bridge_string(SleepyASTNode *node) {
+  if (node && node->type == SLEEPY_AST_ENV_BRIDGE)
+    return node->as.env_bridge.string;
+  return NULL;
+}
+
 static void append_indent(SleepyStringBuffer *buffer, int depth) {
   for (int i = 0; i < depth; i++) {
     sleepy_string_buffer_append_string(buffer, "    ", 4);

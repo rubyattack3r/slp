@@ -277,18 +277,15 @@ func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
 		if val != nil {
 			node.Value = C.GoString(val)
 		}
-		// Manually extract identifier and string if they exist
-		// Since CGO struggles with unions, we use offsets or helpers
-		// identifier is at as.env_bridge.identifier
-		// We'll add them as synthetic children for the Go mirror
-		id_ptr := *(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(&cNode.as[0])) + unsafe.Sizeof(uintptr(0))))
+		// Extract identifier and string safely using C helpers
+		id_ptr := C.sleepy_ast_get_env_bridge_id(cNode)
 		if id_ptr != nil {
 			node.Children = append([]*Node{{
 				Type:  AstIdentifier,
 				Value: C.GoString(id_ptr),
 			}}, node.Children...)
 		}
-		str_ptr := *(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(&cNode.as[0])) + 2*unsafe.Sizeof(uintptr(0))))
+		str_ptr := C.sleepy_ast_get_env_bridge_string(cNode)
 		if str_ptr != nil {
 			node.Children = append([]*Node{{
 				Type:  AstString,
