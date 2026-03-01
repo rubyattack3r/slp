@@ -62,3 +62,11 @@ size_t sleepy_utils_strlen(const char *s) {
   }
   return len;
 }
+
+char *sleepy_utils_strcpy(char *dest, const char *src) {
+  char *d = dest;
+  while ((*d++ = *src++) != '\0') {
+    // nothing
+  }
+  return dest;
+}

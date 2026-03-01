@@ -95,6 +95,25 @@ static SleepyTokenType check_keyword(SleepyLexer *lexer, int start, int length,
   check_keyword(lexer, start, length, rest, type)
 
 static SleepyTokenType identifier_type(SleepyLexer *lexer) {
+  // Check for built-in binary predicates
+  const char *preds[] = {"cmp", "eq",   "gt",      "hasmatch", "is",
+                         "isa", "isin", "ismatch", "iswm",     "in",
+                         "lt",  "ne",   NULL};
+  for (int i = 0; preds[i] != NULL; i++) {
+    size_t len = sleepy_utils_strlen(preds[i]);
+    if ((size_t)(lexer->current - lexer->start) == len) {
+      bool word_match = true;
+      for (size_t j = 0; j < len; j++) {
+        if (lexer->start[j] != preds[i][j]) {
+          word_match = false;
+          break;
+        }
+      }
+      if (word_match)
+        return SLEEPY_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE;
+    }
+  }
+
   switch (lexer->start[0]) {
   case 'a':
     if (lexer->current - lexer->start > 1) {
@@ -136,8 +155,8 @@ static SleepyTokenType identifier_type(SleepyLexer *lexer) {
       switch (lexer->start[1]) {
       case 'l':
         // Only return ELSE if it's exactly "else"
-        if (lexer->current - lexer->start == 4 &&
-            lexer->start[2] == 's' && lexer->start[3] == 'e')
+        if (lexer->current - lexer->start == 4 && lexer->start[2] == 's' &&
+            lexer->start[3] == 'e')
           return SLEEPY_TOKEN_ELSE;
         break;
       }
@@ -168,8 +187,8 @@ static SleepyTokenType identifier_type(SleepyLexer *lexer) {
       switch (lexer->start[1]) {
       case 'a':
         // Only return HALT if it's exactly "halt"
-        if (lexer->current - lexer->start == 4 &&
-            lexer->start[2] == 'l' && lexer->start[3] == 't')
+        if (lexer->current - lexer->start == 4 && lexer->start[2] == 'l' &&
+            lexer->start[3] == 't')
           return SLEEPY_TOKEN_HALT;
         break;
       }
@@ -229,43 +248,28 @@ static SleepyTokenType identifier_type(SleepyLexer *lexer) {
   case 'w':
     return CHECK_KEYWORD(1, 4, "hile", SLEEPY_TOKEN_WHILE);
   case 'x':
-    // 'x' by itself can be the repetition operator, but only in certain contexts
-    // If it's followed by a number, string, literal, or identifier (but not '=' or '=>'), it's the operator
+    // 'x' by itself can be the repetition operator, but only in certain
+    // contexts If it's followed by a number, string, literal, or identifier
+    // (but not '=' or '=>'), it's the operator
     if (lexer->current - lexer->start == 1) {
       // Look ahead past whitespace to determine if this is the operator
       const char *lookahead = lexer->current;
-      while (*lookahead == ' ' || *lookahead == '\t' || *lookahead == '\r' || *lookahead == '\n') {
+      while (*lookahead == ' ' || *lookahead == '\t' || *lookahead == '\r' ||
+             *lookahead == '\n') {
         lookahead++;
       }
       char next = *lookahead;
       // Don't treat as operator if followed by '=' (for '=>' or 'x=')
-      if (next != '=' && (is_digit(next) || next == '"' || next == '\'' ||
-          next == '_' || is_alpha(next) || next == '$' || next == '@' || next == '%')) {
+      if (next != '=' &&
+          (is_digit(next) || next == '"' || next == '\'' || next == '`' ||
+           next == '_' || is_alpha(next) || next == '$' || next == '@' ||
+           next == '%' || next == '(' || next == '[' || next == '{')) {
         return SLEEPY_TOKEN_LOWER_X;
       }
     }
     break;
   case 'y':
     return CHECK_KEYWORD(1, 4, "ield", SLEEPY_TOKEN_YIELD);
-  }
-
-  // Check for built-in binary predicates
-  const char *preds[] = {"cmp", "eq",   "gt",      "hasmatch", "is",
-                         "isa", "isin", "ismatch", "iswm",     "in",
-                         "lt",  "ne",   NULL};
-  for (int i = 0; preds[i] != NULL; i++) {
-    size_t len = sleepy_utils_strlen(preds[i]);
-    if ((size_t)(lexer->current - lexer->start) == len) {
-      bool word_match = true;
-      for (size_t j = 0; j < len; j++) {
-        if (lexer->start[j] != preds[i][j]) {
-          word_match = false;
-          break;
-        }
-      }
-      if (word_match)
-        return SLEEPY_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE;
-    }
   }
 
   return SLEEPY_TOKEN_ID;
@@ -415,7 +419,8 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer) {
       // It's a unary predicate like -isarray or -f
       // Consume the identifier after the dash
       advance(lexer);
-      while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) || peek(lexer) == '_')
+      while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||
+             peek(lexer) == '_')
         advance(lexer);
       return make_token(lexer, SLEEPY_TOKEN_UNARY_PREDICATE_BRIDGE);
     }
@@ -446,8 +451,10 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer) {
       // Consume the class name part
       while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||
              peek(lexer) == '_' || peek(lexer) == '$' || peek(lexer) == '.') {
-        // If the next char is '.' followed by a quote, stop - that's member access
-        if (peek(lexer) == '.' && (peek_next(lexer) == '"' || peek_next(lexer) == '\''))
+        // If the next char is '.' followed by a quote, stop - that's member
+        // access
+        if (peek(lexer) == '.' &&
+            (peek_next(lexer) == '"' || peek_next(lexer) == '\''))
           break;
         advance(lexer);
       }

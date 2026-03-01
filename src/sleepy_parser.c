@@ -1,8 +1,5 @@
 #include "sleepy_parser.h"
 #include "sleepy_utils.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 // Forward declarations
 static void advance(SleepyParser *parser);
@@ -77,12 +74,12 @@ void sleepy_parser_init(SleepyParser *parser, const char *source,
 
 static void error_at(SleepyParser *parser, SleepyToken *token,
                      const char *message) {
+  (void)token;
+  (void)message;
   if (parser->panic_mode)
     return;
   parser->panic_mode = true;
   parser->had_error = true;
-  fprintf(stderr, "[ERROR] at line %d (near '%.*s'): %s\n", token->line,
-          (int)token->length, token->start, message);
 }
 
 static void error(SleepyParser *parser, const char *message) {
@@ -384,35 +381,37 @@ static SleepyASTNode *obj_expr(SleepyParser *parser, SleepyASTNode *left,
     node->as.obj_expr.args = parse_args(parser, &node->as.obj_expr.arg_count,
                                         SLEEPY_TOKEN_RIGHT_BRACKET);
   } else if (!check(parser, SLEEPY_TOKEN_RIGHT_BRACKET)) {
-    // Parse the message - keywords can be used as message names in object expressions
+    // Parse the message - keywords can be used as message names in object
+    // expressions
     SleepyASTNode *message = NULL;
 
     // Check if current token is a command keyword (return, yield, etc.)
     // These should be treated as identifiers in object expressions
     bool is_command_keyword = false;
     switch (parser->current.type) {
-      case SLEEPY_TOKEN_RETURN:
-      case SLEEPY_TOKEN_THROW:
-      case SLEEPY_TOKEN_YIELD:
-      case SLEEPY_TOKEN_ASSERT:
-      case SLEEPY_TOKEN_CALLCC:
-      case SLEEPY_TOKEN_HALT:
-      case SLEEPY_TOKEN_DONE:
-      case SLEEPY_TOKEN_LOCAL:
-      case SLEEPY_TOKEN_THIS:
-      case SLEEPY_TOKEN_BREAK:
-      case SLEEPY_TOKEN_CONTINUE:
-        is_command_keyword = true;
-        break;
-      default:
-        break;
+    case SLEEPY_TOKEN_RETURN:
+    case SLEEPY_TOKEN_THROW:
+    case SLEEPY_TOKEN_YIELD:
+    case SLEEPY_TOKEN_ASSERT:
+    case SLEEPY_TOKEN_CALLCC:
+    case SLEEPY_TOKEN_HALT:
+    case SLEEPY_TOKEN_DONE:
+    case SLEEPY_TOKEN_LOCAL:
+    case SLEEPY_TOKEN_THIS:
+    case SLEEPY_TOKEN_BREAK:
+    case SLEEPY_TOKEN_CONTINUE:
+      is_command_keyword = true;
+      break;
+    default:
+      break;
     }
 
     if (is_command_keyword) {
       // Treat this keyword as an identifier/message name
       advance(parser);
       message = allocate_node(parser, SLEEPY_AST_IDENTIFIER);
-      message->as.string_val = sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
+      message->as.string_val =
+          sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
     } else {
       message = expression(parser);
     }
@@ -485,8 +484,8 @@ static SleepyASTNode *command(SleepyParser *parser, SleepyASTNode *left,
       node->as.control.value = expression(parser);
       // Check for optional : "message"
       if (match(parser, SLEEPY_TOKEN_COLON)) {
-        // The message is parsed as part of the expression - for now just consume it
-        // In a full implementation, we'd store this separately
+        // The message is parsed as part of the expression - for now just
+        // consume it In a full implementation, we'd store this separately
         if (!check(parser, SLEEPY_TOKEN_SEMICOLON) &&
             !check(parser, SLEEPY_TOKEN_EOF)) {
           expression(parser); // Parse but discard the message for now
@@ -766,51 +765,67 @@ static SleepyASTNode *for_statement(SleepyParser *parser) {
   node->as.for_stmt.init_count = 0;
   if (!check(parser, SLEEPY_TOKEN_SEMICOLON)) {
     size_t init_capacity = 4;
-    node->as.for_stmt.initializer = (SleepyASTNode **)parser->allocator->reallocate(
-        NULL, sizeof(SleepyASTNode *) * init_capacity, parser->allocator->user_data);
+    node->as.for_stmt.initializer =
+        (SleepyASTNode **)parser->allocator->reallocate(
+            NULL, sizeof(SleepyASTNode *) * init_capacity,
+            parser->allocator->user_data);
 
-    while (!check(parser, SLEEPY_TOKEN_SEMICOLON) && !check(parser, SLEEPY_TOKEN_EOF)) {
+    while (!check(parser, SLEEPY_TOKEN_SEMICOLON) &&
+           !check(parser, SLEEPY_TOKEN_EOF)) {
       if (node->as.for_stmt.init_count >= init_capacity) {
         init_capacity *= 2;
-        node->as.for_stmt.initializer = (SleepyASTNode **)parser->allocator->reallocate(
-            node->as.for_stmt.initializer, sizeof(SleepyASTNode *) * init_capacity,
-            parser->allocator->user_data);
+        node->as.for_stmt.initializer =
+            (SleepyASTNode **)parser->allocator->reallocate(
+                node->as.for_stmt.initializer,
+                sizeof(SleepyASTNode *) * init_capacity,
+                parser->allocator->user_data);
       }
-      node->as.for_stmt.initializer[node->as.for_stmt.init_count++] = expression(parser);
+      node->as.for_stmt.initializer[node->as.for_stmt.init_count++] =
+          expression(parser);
       if (!match(parser, SLEEPY_TOKEN_COMMA))
         break;
     }
   }
-  consume(parser, SLEEPY_TOKEN_SEMICOLON, "Expect ';' after for loop initializer.");
+  consume(parser, SLEEPY_TOKEN_SEMICOLON,
+          "Expect ';' after for loop initializer.");
 
   // Parse condition
   node->as.for_stmt.condition = NULL;
   if (!check(parser, SLEEPY_TOKEN_SEMICOLON)) {
     node->as.for_stmt.condition = expression(parser);
   }
-  consume(parser, SLEEPY_TOKEN_SEMICOLON, "Expect ';' after for loop condition.");
+  consume(parser, SLEEPY_TOKEN_SEMICOLON,
+          "Expect ';' after for loop condition.");
 
   // Parse increment(s)
   node->as.for_stmt.increment = NULL;
   node->as.for_stmt.inc_count = 0;
-  if (!check(parser, SLEEPY_TOKEN_RIGHT_PAREN) && !check(parser, SLEEPY_TOKEN_EOF)) {
+  if (!check(parser, SLEEPY_TOKEN_RIGHT_PAREN) &&
+      !check(parser, SLEEPY_TOKEN_EOF)) {
     size_t inc_capacity = 4;
-    node->as.for_stmt.increment = (SleepyASTNode **)parser->allocator->reallocate(
-        NULL, sizeof(SleepyASTNode *) * inc_capacity, parser->allocator->user_data);
+    node->as.for_stmt.increment =
+        (SleepyASTNode **)parser->allocator->reallocate(
+            NULL, sizeof(SleepyASTNode *) * inc_capacity,
+            parser->allocator->user_data);
 
-    while (!check(parser, SLEEPY_TOKEN_RIGHT_PAREN) && !check(parser, SLEEPY_TOKEN_EOF)) {
+    while (!check(parser, SLEEPY_TOKEN_RIGHT_PAREN) &&
+           !check(parser, SLEEPY_TOKEN_EOF)) {
       if (node->as.for_stmt.inc_count >= inc_capacity) {
         inc_capacity *= 2;
-        node->as.for_stmt.increment = (SleepyASTNode **)parser->allocator->reallocate(
-            node->as.for_stmt.increment, sizeof(SleepyASTNode *) * inc_capacity,
-            parser->allocator->user_data);
+        node->as.for_stmt.increment =
+            (SleepyASTNode **)parser->allocator->reallocate(
+                node->as.for_stmt.increment,
+                sizeof(SleepyASTNode *) * inc_capacity,
+                parser->allocator->user_data);
       }
-      node->as.for_stmt.increment[node->as.for_stmt.inc_count++] = expression(parser);
+      node->as.for_stmt.increment[node->as.for_stmt.inc_count++] =
+          expression(parser);
       if (!match(parser, SLEEPY_TOKEN_COMMA))
         break;
     }
   }
-  consume(parser, SLEEPY_TOKEN_RIGHT_PAREN, "Expect ')' after for loop increment.");
+  consume(parser, SLEEPY_TOKEN_RIGHT_PAREN,
+          "Expect ')' after for loop increment.");
 
   node->as.for_stmt.body = statement(parser);
   return node;
@@ -874,7 +889,8 @@ static SleepyASTNode *sub_declaration(SleepyParser *parser) {
   SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_CALL);
   // sub is essentially: sub = identifier(name, block)
   SleepyASTNode *sub_id = allocate_node(parser, SLEEPY_AST_IDENTIFIER);
-  sub_id->as.string_val = sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
+  sub_id->as.string_val =
+      sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
 
   // Get the function name
   consume(parser, SLEEPY_TOKEN_ID, "Expect function name after 'sub'.");
@@ -919,13 +935,14 @@ static SleepyASTNode *import_statement(SleepyParser *parser) {
 
   if (check(parser, SLEEPY_TOKEN_ID) || check(parser, SLEEPY_TOKEN_STRING)) {
     if (match(parser, SLEEPY_TOKEN_ID) || match(parser, SLEEPY_TOKEN_STRING)) {
-      const char *part = sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
-      size_t part_len = strlen(part);
+      const char *part =
+          sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
+      size_t part_len = sleepy_utils_strlen(part);
       if (target_len + part_len < sizeof(target_buffer) - 1) {
-        strcpy(target_buffer + target_len, part);
+        sleepy_utils_strcpy(target_buffer + target_len, part);
         target_len += part_len;
       }
-      free((void*)part);
+      SLEEPY_FREE(parser->allocator, (void *)part);
 
       // Check for dotted names (e.g., java.util.*)
       while (match(parser, SLEEPY_TOKEN_DOT)) {
@@ -933,14 +950,17 @@ static SleepyASTNode *import_statement(SleepyParser *parser) {
           target_buffer[target_len++] = '.';
           target_buffer[target_len] = '\0';
         }
-        if (match(parser, SLEEPY_TOKEN_ID) || match(parser, SLEEPY_TOKEN_STRING) || match(parser, SLEEPY_TOKEN_STAR)) {
-          const char *next_part = sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
-          size_t next_len = strlen(next_part);
+        if (match(parser, SLEEPY_TOKEN_ID) ||
+            match(parser, SLEEPY_TOKEN_STRING) ||
+            match(parser, SLEEPY_TOKEN_STAR)) {
+          const char *next_part =
+              sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
+          size_t next_len = sleepy_utils_strlen(next_part);
           if (target_len + next_len < sizeof(target_buffer) - 1) {
-            strcpy(target_buffer + target_len, next_part);
+            sleepy_utils_strcpy(target_buffer + target_len, next_part);
             target_len += next_len;
           }
-          free((void*)next_part);
+          SLEEPY_FREE(parser->allocator, (void *)next_part);
         }
       }
     }
@@ -950,16 +970,18 @@ static SleepyASTNode *import_statement(SleepyParser *parser) {
   if (target_len > 0) {
     char *stored_target = (char *)parser->allocator->reallocate(
         NULL, target_len + 1, parser->allocator->user_data);
-    strcpy(stored_target, target_buffer);
+    sleepy_utils_strcpy(stored_target, target_buffer);
     node->as.import_stmt.target = stored_target;
   }
 
   // Check for optional FROM ':' path
   if (match(parser, SLEEPY_TOKEN_FROM)) {
     consume(parser, SLEEPY_TOKEN_COLON, "Expect ':' after FROM.");
-    if (match(parser, SLEEPY_TOKEN_STRING) || match(parser, SLEEPY_TOKEN_IMPORT_PATH) ||
+    if (match(parser, SLEEPY_TOKEN_STRING) ||
+        match(parser, SLEEPY_TOKEN_IMPORT_PATH) ||
         match(parser, SLEEPY_TOKEN_LITERAL)) {
-      node->as.import_stmt.path = sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
+      node->as.import_stmt.path =
+          sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
     }
   }
 
@@ -1022,19 +1044,21 @@ SleepyASTNode **parse_args(SleepyParser *parser, size_t *count,
       }
       SleepyASTNode *expr = NULL;
 
-      // Special case: 'x' (as LOWER_X or ID) followed by '=>' should be treated as an identifier
-      // This is used in hash literals like: hash(x => "value")
-      if ((check(parser, SLEEPY_TOKEN_LOWER_X) || check(parser, SLEEPY_TOKEN_ID)) &&
+      // Special case: 'x' (as LOWER_X or ID) followed by '=>' should be treated
+      // as an identifier This is used in hash literals like: hash(x => "value")
+      if ((check(parser, SLEEPY_TOKEN_LOWER_X) ||
+           check(parser, SLEEPY_TOKEN_ID)) &&
           parser->current.length == 1 && parser->current.start[0] == 'x') {
         // Check if the next token is =>
         const char *saved_current = parser->lexer.current;
         SleepyToken next_token = sleepy_lexer_scan_token(&parser->lexer);
-        parser->lexer.current = saved_current;  // Restore position
+        parser->lexer.current = saved_current; // Restore position
 
         if (next_token.type == SLEEPY_TOKEN_ARROW) {
           advance(parser);
           expr = allocate_node(parser, SLEEPY_AST_IDENTIFIER);
-          expr->as.string_val = sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
+          expr->as.string_val =
+              sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
         } else {
           expr = expression(parser);
         }
