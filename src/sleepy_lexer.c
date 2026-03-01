@@ -10,7 +10,7 @@ static bool is_alpha(char c) {
 
 static bool is_at_end(SleepyLexer *lexer) { return *lexer->current == '\0'; }
 
-static char advance(SleepyLexer *lexer) {
+static char lexer_advance(SleepyLexer *lexer) {
   lexer->current++;
   return lexer->current[-1];
 }
@@ -23,7 +23,7 @@ static char peek_next(SleepyLexer *lexer) {
   return lexer->current[1];
 }
 
-static bool match(SleepyLexer *lexer, char expected) {
+static bool lexer_match(SleepyLexer *lexer, char expected) {
   if (is_at_end(lexer))
     return false;
   if (*lexer->current != expected)
@@ -61,15 +61,15 @@ static void skip_whitespace(SleepyLexer *lexer) {
     case ' ':
     case '\r':
     case '\t':
-      advance(lexer);
+      lexer_advance(lexer);
       break;
     case '\n':
       lexer->line++;
-      advance(lexer);
+      lexer_advance(lexer);
       break;
     case '#': // Comment
       while (peek(lexer) != '\n' && !is_at_end(lexer))
-        advance(lexer);
+        lexer_advance(lexer);
       break;
     default:
       return;
@@ -278,35 +278,35 @@ static SleepyTokenType identifier_type(SleepyLexer *lexer) {
 static SleepyToken scan_identifier(SleepyLexer *lexer) {
   while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) || peek(lexer) == '-' ||
          peek(lexer) == '+') {
-    advance(lexer);
+    lexer_advance(lexer);
   }
   return make_token(lexer, identifier_type(lexer));
 }
 
 static SleepyToken scan_number(SleepyLexer *lexer) {
   if (*lexer->start == '0' && (peek(lexer) == 'x' || peek(lexer) == 'X')) {
-    advance(lexer); // consume 'x'
+    lexer_advance(lexer); // consume 'x'
     while (is_digit(peek(lexer)) ||
            (peek(lexer) >= 'a' && peek(lexer) <= 'f') ||
            (peek(lexer) >= 'A' && peek(lexer) <= 'F')) {
-      advance(lexer);
+      lexer_advance(lexer);
     }
   } else {
     while (is_digit(peek(lexer)))
-      advance(lexer);
+      lexer_advance(lexer);
 
     // Look for a fractional part.
     if (peek(lexer) == '.' && is_digit(peek_next(lexer))) {
       // Consume the "."
-      advance(lexer);
+      lexer_advance(lexer);
       while (is_digit(peek(lexer)))
-        advance(lexer);
+        lexer_advance(lexer);
       return make_token(lexer, SLEEPY_TOKEN_DOUBLE);
     }
   }
 
   if (peek(lexer) == 'L' || peek(lexer) == 'l') {
-    advance(lexer);
+    lexer_advance(lexer);
     return make_token(lexer, SLEEPY_TOKEN_LONG);
   }
 
@@ -319,16 +319,16 @@ static SleepyToken scan_string(SleepyLexer *lexer, char quote,
     if (peek(lexer) == '\n')
       lexer->line++;
     if (peek(lexer) == '\\') {
-      advance(lexer); // skip the escape
+      lexer_advance(lexer); // skip the escape
     }
-    advance(lexer);
+    lexer_advance(lexer);
   }
 
   if (is_at_end(lexer))
     return error_token(lexer, "Unterminated string.");
 
   // The closing quote.
-  advance(lexer);
+  lexer_advance(lexer);
   return make_token(lexer, string_type);
 }
 
@@ -347,7 +347,7 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer) {
   if (is_at_end(lexer))
     return make_token(lexer, SLEEPY_TOKEN_EOF);
 
-  char c = advance(lexer);
+  char c = lexer_advance(lexer);
 
   if (is_alpha(c))
     return scan_identifier(lexer);
@@ -377,24 +377,24 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer) {
     if (is_alpha(peek(lexer)) || is_digit(peek(lexer)) || peek(lexer) == '_') {
       while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||
              peek(lexer) == '_')
-        advance(lexer);
+        lexer_advance(lexer);
     }
     return make_token(lexer, SLEEPY_TOKEN_AT);
   case '\\':
     if (peek(lexer) == '&') {
-      advance(lexer); // consume &
+      lexer_advance(lexer); // consume &
       if (is_alpha(peek(lexer)) || peek(lexer) == '_') {
         while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||
                peek(lexer) == '_')
-          advance(lexer);
+          lexer_advance(lexer);
         return make_token(lexer, SLEEPY_TOKEN_ADDRESS);
       }
     }
     if (peek(lexer) == '$' || peek(lexer) == '@' || peek(lexer) == '%') {
-      advance(lexer); // consume symbol
+      lexer_advance(lexer); // consume symbol
       while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||
              peek(lexer) == '_')
-        advance(lexer);
+        lexer_advance(lexer);
       return make_token(lexer, SLEEPY_TOKEN_ARG_PASSED_BY_NAME);
     }
     return make_token(lexer, SLEEPY_TOKEN_BACKSLASH);
@@ -402,50 +402,50 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer) {
     if (is_alpha(peek(lexer)) || is_digit(peek(lexer)) || peek(lexer) == '_') {
       while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||
              peek(lexer) == '_')
-        advance(lexer);
+        lexer_advance(lexer);
     }
     return make_token(lexer, SLEEPY_TOKEN_PERCENT);
 
   case '.':
-    if (match(lexer, '='))
+    if (lexer_match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_CATEQUAL);
     return make_token(lexer, SLEEPY_TOKEN_DOT);
   case '-':
-    if (match(lexer, '-'))
+    if (lexer_match(lexer, '-'))
       return make_token(lexer, SLEEPY_TOKEN_DEC);
-    if (match(lexer, '='))
+    if (lexer_match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_MINUSEQUAL);
     if (is_alpha(peek(lexer))) {
       // It's a unary predicate like -isarray or -f
       // Consume the identifier after the dash
-      advance(lexer);
+      lexer_advance(lexer);
       while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||
              peek(lexer) == '_')
-        advance(lexer);
+        lexer_advance(lexer);
       return make_token(lexer, SLEEPY_TOKEN_UNARY_PREDICATE_BRIDGE);
     }
     return make_token(lexer, SLEEPY_TOKEN_MINUS);
   case '+':
-    if (match(lexer, '+'))
+    if (lexer_match(lexer, '+'))
       return make_token(lexer, SLEEPY_TOKEN_INC);
-    if (match(lexer, '='))
+    if (lexer_match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_PLUSEQUAL);
     return make_token(lexer, SLEEPY_TOKEN_PLUS);
   case '/':
-    if (match(lexer, '='))
+    if (lexer_match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_DIVEQUAL);
     return make_token(lexer, SLEEPY_TOKEN_SLASH);
   case '*':
-    if (match(lexer, '*')) {
-      if (match(lexer, '='))
+    if (lexer_match(lexer, '*')) {
+      if (lexer_match(lexer, '='))
         return make_token(lexer, SLEEPY_TOKEN_EXPEQUAL);
       return make_token(lexer, SLEEPY_TOKEN_EXP);
     }
-    if (match(lexer, '='))
+    if (lexer_match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_TIMESEQUAL);
     return make_token(lexer, SLEEPY_TOKEN_STAR);
   case '^':
-    if (match(lexer, '='))
+    if (lexer_match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_XOREQUAL);
     if (is_alpha(peek(lexer)) || peek(lexer) == '_' || peek(lexer) == '$') {
       // Consume the class name part
@@ -456,61 +456,61 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer) {
         if (peek(lexer) == '.' &&
             (peek_next(lexer) == '"' || peek_next(lexer) == '\''))
           break;
-        advance(lexer);
+        lexer_advance(lexer);
       }
       return make_token(lexer, SLEEPY_TOKEN_CLASS_LITERAL);
     }
     return make_token(lexer, SLEEPY_TOKEN_CARET);
   case '|':
-    if (match(lexer, '|'))
+    if (lexer_match(lexer, '|'))
       return make_token(lexer, SLEEPY_TOKEN_LOR);
-    if (match(lexer, '='))
+    if (lexer_match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_OREQUAL);
     return make_token(lexer, SLEEPY_TOKEN_PIPE);
   case '&':
-    if (match(lexer, '&'))
+    if (lexer_match(lexer, '&'))
       return make_token(lexer, SLEEPY_TOKEN_LAND);
-    if (match(lexer, '='))
+    if (lexer_match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_ANDEQUAL);
     if (is_alpha(peek(lexer)) || peek(lexer) == '_') {
       while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||
              peek(lexer) == '_')
-        advance(lexer);
+        lexer_advance(lexer);
       return make_token(lexer, SLEEPY_TOKEN_ADDRESS);
     }
     return make_token(lexer, SLEEPY_TOKEN_AMPERSAND);
   case '!':
-    if (match(lexer, '=')) {
-      if (match(lexer, '~'))
+    if (lexer_match(lexer, '=')) {
+      if (lexer_match(lexer, '~'))
         return make_token(lexer, SLEEPY_TOKEN_NEQI);
       return make_token(lexer, SLEEPY_TOKEN_NE);
     }
     return make_token(lexer, SLEEPY_TOKEN_BANG);
   case '=':
-    if (match(lexer, '='))
+    if (lexer_match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_EQ);
-    if (match(lexer, '~'))
+    if (lexer_match(lexer, '~'))
       return make_token(lexer, SLEEPY_TOKEN_EQI);
-    if (match(lexer, '>'))
+    if (lexer_match(lexer, '>'))
       return make_token(lexer, SLEEPY_TOKEN_ARROW);
     return make_token(lexer, SLEEPY_TOKEN_EQUAL);
   case '<':
-    if (match(lexer, '=')) {
-      if (match(lexer, '>'))
+    if (lexer_match(lexer, '=')) {
+      if (lexer_match(lexer, '>'))
         return make_token(lexer, SLEEPY_TOKEN_SPACESHIP);
       return make_token(lexer, SLEEPY_TOKEN_LE);
     }
-    if (match(lexer, '<')) {
-      if (match(lexer, '='))
+    if (lexer_match(lexer, '<')) {
+      if (lexer_match(lexer, '='))
         return make_token(lexer, SLEEPY_TOKEN_LSHIFTEQUAL);
       return make_token(lexer, SLEEPY_TOKEN_LSHIFT);
     }
     return make_token(lexer, SLEEPY_TOKEN_LESS);
   case '>':
-    if (match(lexer, '='))
+    if (lexer_match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_GE);
-    if (match(lexer, '>')) {
-      if (match(lexer, '='))
+    if (lexer_match(lexer, '>')) {
+      if (lexer_match(lexer, '='))
         return make_token(lexer, SLEEPY_TOKEN_RSHIFTEQUAL);
       return make_token(lexer, SLEEPY_TOKEN_RSHIFT);
     }
@@ -524,18 +524,18 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer) {
     return scan_string(lexer, '`', SLEEPY_TOKEN_BACKTICK_EXPR);
 
   case '$':
-    if (match(lexer, 'n') && match(lexer, 'u') && match(lexer, 'l') &&
-        match(lexer, 'l')) {
+    if (lexer_match(lexer, 'n') && lexer_match(lexer, 'u') &&
+        lexer_match(lexer, 'l') && lexer_match(lexer, 'l')) {
       return make_token(lexer, SLEEPY_TOKEN_NULL);
     }
     // Check for special scalar $+
     if (peek(lexer) == '+') {
-      advance(lexer);
+      lexer_advance(lexer);
       return make_token(lexer, SLEEPY_TOKEN_SCALAR);
     }
     // Otherwise parse normal SCALAR
     while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) || peek(lexer) == '_')
-      advance(lexer);
+      lexer_advance(lexer);
     return make_token(lexer, SLEEPY_TOKEN_SCALAR);
   }
 

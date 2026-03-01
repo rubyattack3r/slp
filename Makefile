@@ -10,9 +10,9 @@ OBJ = $(SRC:.c=.o)
 TEST_SRC = $(wildcard tests/*.cpp)
 TEST_OBJ = $(TEST_SRC:.cpp=.o)
 
-.PHONY: all clean test
+.PHONY: all clean test amalgamate
 
-all: sleepy_lib
+all: sleepy_lib amalgamate
 
 # For now, sleepy_lib is a static library of the C implementation
 sleepy_lib: $(OBJ)
@@ -32,4 +32,10 @@ test: test_runner
 	./test_runner
 
 clean:
-	rm -f src/*.o tests/*.o test_runner libsleepy.a
+	rm -rf src/*.o tests/*.o test_runner libsleepy.a dist/
+
+amalgamate:
+	./scripts/amalgamate.sh
+
+amalgamate-single:
+	./scripts/amalgamate.sh --single
