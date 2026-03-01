@@ -18,6 +18,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	parser := sleepy.NewParser()
+	defer parser.Close()
+
 	// Goal: Create blah = { keys... }
 	// We'll build this as an assignment of a block to a scalar
 	
@@ -28,8 +31,6 @@ func main() {
 	for k, v := range data {
 		// Represent each key-value pair as an assignment inside the block
 		// e.g. $k = "v";
-		parser := sleepy.NewParser()
-		defer parser.Close()
 		assign := &sleepy.Node{
 			Type: sleepy.AstAssignment,
 			Children: []*sleepy.Node{
@@ -55,7 +56,7 @@ func main() {
 	}
 
 	fmt.Println("Resulting Sleepy Code:")
-	fmt.Println(root.Format())
+	fmt.Println(root.Format(parser))
 }
 
 func convertToNode(v interface{}) *sleepy.Node {

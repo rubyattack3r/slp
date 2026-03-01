@@ -448,5 +448,37 @@ bool sleepy_ast_get_bool(SleepyASTNode *node);
 const char *sleepy_ast_get_env_bridge_id(SleepyASTNode *node);
 const char *sleepy_ast_get_env_bridge_string(SleepyASTNode *node);
 
+// AST Builder APIs for FFI
+SleepyASTNode *sleepy_ast_build_node(SleepyASTNodeType type, int line,
+                                     SleepyAllocator *allocator);
+void sleepy_ast_set_string_val(SleepyASTNode *node, const char *str,
+                               SleepyAllocator *allocator);
+void sleepy_ast_set_long_val(SleepyASTNode *node, long val);
+void sleepy_ast_set_double_val(SleepyASTNode *node, double val);
+void sleepy_ast_set_bool_val(SleepyASTNode *node, bool val);
+
+// List/Array Setters
+void sleepy_ast_set_children(SleepyASTNode *node, SleepyASTNode **children,
+                             size_t count, SleepyAllocator *allocator);
+
+// Complex Setters
+void sleepy_ast_set_binop(SleepyASTNode *node, SleepyASTNode *left,
+                          SleepyASTNode *right);
+void sleepy_ast_set_if(SleepyASTNode *node, SleepyASTNode *condition,
+                       SleepyASTNode *then_branch, SleepyASTNode *else_branch);
+void sleepy_ast_set_while(SleepyASTNode *node, SleepyASTNode *condition,
+                          SleepyASTNode *body);
+void sleepy_ast_set_arg(SleepyASTNode *node, SleepyASTNode *value);
+void sleepy_ast_set_assignment(SleepyASTNode *node, SleepyASTNode *target,
+                               SleepyASTNode *value);
+void sleepy_ast_set_env_bridge(SleepyASTNode *node, const char *id,
+                               const char *str, SleepyASTNode **children,
+                               size_t count, SleepyAllocator *allocator);
+void sleepy_ast_set_call_target(SleepyASTNode *node, const char *target,
+                                SleepyAllocator *allocator);
+
+// Memory Management
+void sleepy_parser_free_node(SleepyASTNode *node, SleepyAllocator *allocator);
+
 
 #endif // SLEEPY_H

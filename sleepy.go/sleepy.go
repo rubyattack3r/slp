@@ -224,133 +224,163 @@ func (p *Parser) Parse(source string) (*Node, error) {
 	return p.convertNode(node), nil
 }
 
-// Format serializes the AST node back into Sleepy source code.
-func (n *Node) Format() string {
-	if n == nil {
+// Format serializes the AST node back into Sleepy source code natively using the core C formatter.
+func (n *Node) Format(p *Parser) string {
+	if n == nil || p == nil {
 		return ""
 	}
 
-	// We'll use a temporary allocator for formatting
-	alloc := (*C.SleepyAllocator)(C.malloc(C.sizeof_SleepyAllocator))
-	C.set_go_allocator(alloc)
-	defer C.free(unsafe.Pointer(alloc))
+	// 1. Build C AST Tree
+	cNode := p.buildCNode(n)
+	if cNode == nil {
+		return ""
+	}
+	defer C.sleepy_parser_free_node(cNode, p.allocator)
 
-	// We need to reconstruct a C AST node for the unparser
-	// Since our Go Node is a mirror, this is complex if we want to support 
-	// round-tripping modified Go nodes back to C.
-	// For now, let's implement a Go-native Formatter to make it easier to 
-	// manipulate the AST in Go and still print it.
-	return n.formatNative()
+	// 2. Format it using the C library
+	// The C formatter returns an allocated string that we must free
+	cStr := C.sleepy_ast_format(cNode, p.allocator)
+	if cStr == nil {
+		return ""
+	}
+	// We use the same allocator to free the resulting string memory by reallocating to size 0
+	defer C.goSleepyReallocInfo(unsafe.Pointer(cStr), 0, nil)
+
+	return C.GoString(cStr)
 }
 
-func (n *Node) formatNative() string {
-	if n == nil {
-		return ""
+// buildCNode constructs a C AST Node tree from a Go Node tree.
+func (p *Parser) buildCNode(node *Node) *C.SleepyASTNode {
+	if node == nil {
+		return nil
 	}
-	switch n.Type {
-	case AstScript, AstBlock:
-		res := ""
-		if n.Type == AstBlock {
-			res += "{\n"
-		}
-		for i, child := range n.Children {
-			if n.Type == AstBlock {
-				res += "    "
-			}
-			res += child.formatNative()
-			if child.Type != AstEnvBridge && child.Type != AstIf && child.Type != AstWhile && child.Type != AstFor && child.Type != AstForeach {
-				res += ";"
-			}
-			if i < len(n.Children)-1 || n.Type == AstBlock {
-				res += "\n"
-			}
-		}
-		if n.Type == AstBlock {
-			res += "}"
-		}
-		return res
+
+	cNode := C.sleepy_ast_build_node(C.SleepyASTNodeType(node.Type), C.int(node.Line), p.allocator)
+	if cNode == nil {
+		return nil
+	}
+
+	// Assign values
+	switch node.Type {
 	case AstBoolean:
-		if val, ok := n.Value.(bool); ok {
-			if val {
-				return "$true"
-			}
-			return "$false"
+		if val, ok := node.Value.(bool); ok {
+			C.sleepy_ast_set_bool_val(cNode, C.bool(val))
 		}
-		return "/* invalid bool */"
 	case AstLong:
-		if val, ok := n.Value.(int64); ok {
-			return fmt.Sprintf("%dL", val)
+		if val, ok := node.Value.(int64); ok {
+			C.sleepy_ast_set_long_val(cNode, C.long(val))
 		}
-		return "/* invalid long */"
 	case AstNumber:
-		if val, ok := n.Value.(float64); ok {
-			return fmt.Sprintf("%g", val)
+		if val, ok := node.Value.(float64); ok {
+			C.sleepy_ast_set_double_val(cNode, C.double(val))
 		}
-		return "/* invalid number */"
-	case AstString, AstLiteral:
-		if val, ok := n.Value.(string); ok {
-			return val
+	case AstString, AstLiteral, AstScalar, AstArray, AstHashtable, AstIdentifier, AstClassLiteral:
+		if val, ok := node.Value.(string); ok {
+			cStr := C.CString(val)
+			defer C.free(unsafe.Pointer(cStr))
+			C.sleepy_ast_set_string_val(cNode, cStr, p.allocator)
 		}
-		return "/* invalid string */"
-	case AstScalar:
-		if val, ok := n.Value.(string); ok {
-			return "$" + val
-		}
-		return "/* invalid scalar */"
-	case AstIdentifier, AstArray, AstHashtable, AstClassLiteral:
-		if val, ok := n.Value.(string); ok {
-			return val
-		}
-		return "/* nil ID */"
-	case AstCall:
-		target := "/* missing call target */"
-		if val, ok := n.Value.(string); ok {
-			target = val
-		}
-		res := target + "("
-		for i, child := range n.Children {
-			res += child.formatNative()
-			if i < len(n.Children)-1 {
-				res += ", "
-			}
-		}
-		res += ")"
-		return res
-	case AstArg:
-		if len(n.Children) > 0 {
-			return n.Children[0].formatNative()
-		}
-		return ""
-	case AstAssignment:
-		if len(n.Children) == 2 {
-			return n.Children[0].formatNative() + " = " + n.Children[1].formatNative()
-		}
-		return "/* invalid assign */"
-	case AstEnvBridge:
-		res := "/* invalid env bridge */"
-		if val, ok := n.Value.(string); ok {
-			res = val
-		}
-		for _, child := range n.Children {
-			res += " " + child.formatNative()
-		}
-		return res
-	case AstIf:
-		res := "if ("
-		if len(n.Children) > 0 {
-			res += n.Children[0].formatNative()
-		}
-		res += ") "
-		if len(n.Children) > 1 {
-			res += n.Children[1].formatNative()
-		}
-		if len(n.Children) > 2 {
-			res += " else " + n.Children[2].formatNative()
-		}
-		return res
-	default:
-		return fmt.Sprintf("/* format not implemented for type %d */", n.Type)
 	}
+
+	// Helper for children
+	buildChildren := func() (**C.SleepyASTNode, C.size_t) {
+		if len(node.Children) == 0 {
+			return nil, 0
+		}
+		cChildren := make([]*C.SleepyASTNode, len(node.Children))
+		for i, child := range node.Children {
+			cChildren[i] = p.buildCNode(child)
+		}
+		// CGo trick to get pointer to array elements
+		return (**C.SleepyASTNode)(unsafe.Pointer(&cChildren[0])), C.size_t(len(node.Children))
+	}
+
+	// Configure structure based on specific node types
+	switch node.Type {
+	case AstBlock, AstScript:
+		cChildrenArr, cCount := buildChildren()
+		C.sleepy_ast_set_children(cNode, cChildrenArr, cCount, p.allocator)
+
+	case AstCall:
+		cChildrenArr, cCount := buildChildren()
+		C.sleepy_ast_set_children(cNode, cChildrenArr, cCount, p.allocator)
+		if val, ok := node.Value.(string); ok {
+			cTarget := C.CString(val)
+			defer C.free(unsafe.Pointer(cTarget))
+			C.sleepy_ast_set_call_target(cNode, cTarget, p.allocator)
+		}
+
+	case AstBinop:
+		if len(node.Children) == 2 {
+			cLeft := p.buildCNode(node.Children[0])
+			cRight := p.buildCNode(node.Children[1])
+			C.sleepy_ast_set_binop(cNode, cLeft, cRight)
+		}
+
+	case AstIf:
+		var cCond, cThen, cElse *C.SleepyASTNode
+		if len(node.Children) > 0 {
+			cCond = p.buildCNode(node.Children[0])
+		}
+		if len(node.Children) > 1 {
+			cThen = p.buildCNode(node.Children[1])
+		}
+		if len(node.Children) > 2 {
+			cElse = p.buildCNode(node.Children[2])
+		}
+		C.sleepy_ast_set_if(cNode, cCond, cThen, cElse)
+
+	case AstWhile:
+		var cCond, cBody *C.SleepyASTNode
+		if len(node.Children) > 0 {
+			cCond = p.buildCNode(node.Children[0])
+		}
+		if len(node.Children) > 1 {
+			cBody = p.buildCNode(node.Children[1])
+		}
+		C.sleepy_ast_set_while(cNode, cCond, cBody)
+
+	case AstArg:
+		if len(node.Children) > 0 {
+			cVal := p.buildCNode(node.Children[0])
+			C.sleepy_ast_set_arg(cNode, cVal)
+		}
+
+	case AstAssignment:
+		if len(node.Children) == 2 {
+			cTarget := p.buildCNode(node.Children[0])
+			cVal := p.buildCNode(node.Children[1])
+			C.sleepy_ast_set_assignment(cNode, cTarget, cVal)
+		}
+
+	case AstEnvBridge:
+		var cId, cStr *C.char
+		var cChildrenArr **C.SleepyASTNode
+		var cCount C.size_t
+
+		if len(node.Children) >= 2 && node.Children[0].Type == AstIdentifier && node.Children[1].Type == AstString {
+			// Extract our artificial children back into the original ID strings
+			if val, ok := node.Children[0].Value.(string); ok {
+				cId = C.CString(val)
+				defer C.free(unsafe.Pointer(cId))
+			}
+			if val, ok := node.Children[1].Value.(string); ok {
+				cStr = C.CString(val)
+				defer C.free(unsafe.Pointer(cStr))
+			}
+
+			// Any remaining children are actual bridge arguments
+			if len(node.Children) > 2 {
+				origChildren := node.Children
+				node.Children = node.Children[2:]
+				cChildrenArr, cCount = buildChildren()
+				node.Children = origChildren // restore
+			}
+			C.sleepy_ast_set_env_bridge(cNode, cId, cStr, cChildrenArr, cCount, p.allocator)
+		}
+	}
+
+	return cNode
 }
 
 // Walk traverses the AST and applies the provided function to each node.

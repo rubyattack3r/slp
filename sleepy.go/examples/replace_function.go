@@ -46,6 +46,6 @@ func main() {
 	// Transform the AST
 	root = root.Walk(replaceFn)
 
-	// Format back to Sleepy code
-	fmt.Println(root.Format())
+	// Format the modified AST back to Sleepy source
+	fmt.Println(root.Format(parser))
 }

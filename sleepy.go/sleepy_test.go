@@ -39,7 +39,7 @@ func TestASTFormat(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	formatted := node.Format()
+	formatted := node.Format(parser)
 	expected := `println("Hello", 123, $true)`
 	if !strings.Contains(formatted, expected) {
 		t.Errorf("Format() output did not contain expected code.\nGot: %s\nExpected: %s", formatted, expected)
@@ -70,7 +70,7 @@ func TestASTWalk(t *testing.T) {
 		t.Errorf("Expected to walk 2 function calls, found %d", callCount)
 	}
 
-	formatted := node.Format()
+	formatted := node.Format(parser)
 	if !strings.Contains(formatted, "baz()") || !strings.Contains(formatted, "bar()") {
 		t.Errorf("Walk modification failed, got: %s", formatted)
 	}
@@ -100,7 +100,7 @@ func TestASTWalkIf(t *testing.T) {
 		t.Errorf("Expected to walk 2 function calls inside if/else branches, found %d", callCount)
 	}
 
-	formatted := node.Format()
+	formatted := node.Format(parser)
 	if !strings.Contains(formatted, "baz()") {
 		t.Errorf("Walk modification inside then_branch failed, got: %s", formatted)
 	}
