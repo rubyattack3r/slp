@@ -1,5 +1,6 @@
 #include "sleepy_lexer.h"
 #include "sleepy_utils.h"
+#include <stdio.h>
 
 static bool is_digit(char c) { return c >= '0' && c <= '9'; }
 
@@ -131,7 +132,17 @@ static SleepyTokenType identifier_type(SleepyLexer *lexer) {
   case 'd':
     return CHECK_KEYWORD(1, 3, "one", SLEEPY_TOKEN_DONE);
   case 'e':
-    return CHECK_KEYWORD(1, 3, "lse", SLEEPY_TOKEN_ELSE);
+    if (lexer->current - lexer->start > 1) {
+      switch (lexer->start[1]) {
+      case 'l':
+        // Only return ELSE if it's exactly "else"
+        if (lexer->current - lexer->start == 4 &&
+            lexer->start[2] == 's' && lexer->start[3] == 'e')
+          return SLEEPY_TOKEN_ELSE;
+        break;
+      }
+    }
+    break;
   case 'f':
     if (lexer->current - lexer->start > 1) {
       switch (lexer->start[1]) {
@@ -153,7 +164,17 @@ static SleepyTokenType identifier_type(SleepyLexer *lexer) {
     }
     break;
   case 'h':
-    return CHECK_KEYWORD(1, 3, "alt", SLEEPY_TOKEN_HALT);
+    if (lexer->current - lexer->start > 1) {
+      switch (lexer->start[1]) {
+      case 'a':
+        // Only return HALT if it's exactly "halt"
+        if (lexer->current - lexer->start == 4 &&
+            lexer->start[2] == 'l' && lexer->start[3] == 't')
+          return SLEEPY_TOKEN_HALT;
+        break;
+      }
+    }
+    break;
   case 'i':
     if (lexer->current - lexer->start > 1) {
       switch (lexer->start[1]) {
@@ -207,6 +228,18 @@ static SleepyTokenType identifier_type(SleepyLexer *lexer) {
     break;
   case 'w':
     return CHECK_KEYWORD(1, 4, "hile", SLEEPY_TOKEN_WHILE);
+  case 'x':
+    // 'x' by itself can be the repetition operator, but only in certain contexts
+    // If it's followed by a number, string, literal, or identifier (but not '=' or '=>'), it's the operator
+    if (lexer->current - lexer->start == 1) {
+      char next = peek(lexer);
+      // Don't treat as operator if followed by '=' (for '=>' or 'x=')
+      if (next != '=' && (is_digit(next) || next == '"' || next == '\'' ||
+          next == '_' || is_alpha(next) || next == '$' || next == '@' || next == '%')) {
+        return SLEEPY_TOKEN_LOWER_X;
+      }
+    }
+    break;
   case 'y':
     return CHECK_KEYWORD(1, 4, "ield", SLEEPY_TOKEN_YIELD);
   }
@@ -373,12 +406,12 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer) {
       return make_token(lexer, SLEEPY_TOKEN_DEC);
     if (match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_MINUSEQUAL);
-    if (is_alpha(peek(lexer)) &&
-        (peek_next(lexer) == ' ' || peek_next(lexer) == '\t' ||
-         peek_next(lexer) == '\r' || peek_next(lexer) == '\n' ||
-         peek_next(lexer) == '\0' || peek_next(lexer) == '(')) {
-      // It's likely a unary predicate like -f
+    if (is_alpha(peek(lexer))) {
+      // It's a unary predicate like -isarray or -f
+      // Consume the identifier after the dash
       advance(lexer);
+      while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) || peek(lexer) == '_')
+        advance(lexer);
       return make_token(lexer, SLEEPY_TOKEN_UNARY_PREDICATE_BRIDGE);
     }
     return make_token(lexer, SLEEPY_TOKEN_MINUS);
@@ -405,9 +438,14 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer) {
     if (match(lexer, '='))
       return make_token(lexer, SLEEPY_TOKEN_XOREQUAL);
     if (is_alpha(peek(lexer)) || peek(lexer) == '_' || peek(lexer) == '$') {
+      // Consume the class name part
       while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||
-             peek(lexer) == '_' || peek(lexer) == '$' || peek(lexer) == '.')
+             peek(lexer) == '_' || peek(lexer) == '$' || peek(lexer) == '.') {
+        // If the next char is '.' followed by a quote, stop - that's member access
+        if (peek(lexer) == '.' && (peek_next(lexer) == '"' || peek_next(lexer) == '\''))
+          break;
         advance(lexer);
+      }
       return make_token(lexer, SLEEPY_TOKEN_CLASS_LITERAL);
     }
     return make_token(lexer, SLEEPY_TOKEN_CARET);
@@ -478,10 +516,13 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer) {
         match(lexer, 'l')) {
       return make_token(lexer, SLEEPY_TOKEN_NULL);
     }
-    // Otherwise try parsing SCALAR
-    while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) || peek(lexer) == '_')
+    // Check for special scalar $+
+    if (peek(lexer) == '+') {
       advance(lexer);
-    if (peek(lexer) == '+')
+      return make_token(lexer, SLEEPY_TOKEN_SCALAR);
+    }
+    // Otherwise parse normal SCALAR
+    while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) || peek(lexer) == '_')
       advance(lexer);
     return make_token(lexer, SLEEPY_TOKEN_SCALAR);
   }
