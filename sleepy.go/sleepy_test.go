@@ -1,26 +1,77 @@
 package sleepy
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParserSuccess(t *testing.T) {
 	parser := NewParser()
+	defer parser.Free()
 	source := `println("Hello World");`
 	
-	success, err := parser.Parse(source)
+	node, err := parser.Parse(source)
 	if err != nil {
 		t.Fatalf("Expected parsing to succeed, got error: %v", err)
 	}
-	if success == nil {
-		t.Fatalf("Expected success to not be nil")
+	if node == nil {
+		t.Fatalf("Expected node to not be nil")
 	}
 }
 
 func TestParserFailure(t *testing.T) {
 	parser := NewParser()
+	defer parser.Free()
 	source := `println("Hello World"` // Missing closing paren
 	
-	success, _ := parser.Parse(source)
-	if success != nil {
+	node, err := parser.Parse(source)
+	if err == nil || node != nil {
 		t.Fatalf("Expected parsing to fail")
+	}
+}
+
+func TestASTFormat(t *testing.T) {
+	parser := NewParser()
+	defer parser.Free()
+	source := `println("Hello", 123, $true);`
+	node, err := parser.Parse(source)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	formatted := node.Format()
+	expected := `println("Hello", 123, $true)`
+	if !strings.Contains(formatted, expected) {
+		t.Errorf("Format() output did not contain expected code.\nGot: %s\nExpected: %s", formatted, expected)
+	}
+}
+
+func TestASTWalk(t *testing.T) {
+	parser := NewParser()
+	defer parser.Free()
+	source := `foo(); bar();`
+	node, err := parser.Parse(source)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	callCount := 0
+	node.Walk(func(n *Node) *Node {
+		if n != nil && n.Type == AstCall {
+			callCount++
+			if n.Value == "foo" {
+				n.Value = "baz"
+			}
+		}
+		return n
+	})
+
+	if callCount != 2 {
+		t.Errorf("Expected to walk 2 function calls, found %d", callCount)
+	}
+
+	formatted := node.Format()
+	if !strings.Contains(formatted, "baz()") || !strings.Contains(formatted, "bar()") {
+		t.Errorf("Walk modification failed, got: %s", formatted)
 	}
 }

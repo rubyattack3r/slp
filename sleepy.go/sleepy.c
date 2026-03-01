@@ -1760,6 +1760,106 @@ char *sleepy_ast_format(SleepyASTNode *node, SleepyAllocator *allocator) {
   return buffer.data;
 }
 
+// --- Bindings Helpers ---
+
+void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
+                             size_t *out_count) {
+  *out_children = NULL;
+  *out_count = 0;
+  if (!node)
+    return;
+
+  switch (node->type) {
+  case SLEEPY_AST_SCRIPT:
+  case SLEEPY_AST_BLOCK:
+    *out_children = node->as.block.statements;
+    *out_count = node->as.block.count;
+    break;
+  case SLEEPY_AST_CALL:
+    *out_children = node->as.call.args;
+    *out_count = node->as.call.arg_count;
+    break;
+  case SLEEPY_AST_BINOP: {
+    static SleepyASTNode *binop_children[2];
+    binop_children[0] = node->as.binop.left;
+    binop_children[1] = node->as.binop.right;
+    *out_children = binop_children;
+    *out_count = 2;
+    break;
+  }
+  case SLEEPY_AST_ASSIGNMENT: {
+    static SleepyASTNode *assign_children[2];
+    assign_children[0] = node->as.assign.left;
+    assign_children[1] = node->as.assign.right;
+    *out_children = assign_children;
+    *out_count = 2;
+    break;
+  }
+  case SLEEPY_AST_ARG: {
+    static SleepyASTNode *arg_children[1];
+    arg_children[0] = node->as.arg.value;
+    *out_children = arg_children;
+    *out_count = 1;
+    break;
+  }
+  case SLEEPY_AST_ENV_BRIDGE: {
+    static SleepyASTNode *bridge_children[3];
+    size_t count = 0;
+    if (node->as.env_bridge.body) {
+      bridge_children[count++] = node->as.env_bridge.body;
+    }
+    *out_children = bridge_children;
+    *out_count = count;
+    break;
+  }
+  default:
+    break;
+  }
+}
+
+const char *sleepy_ast_get_string(SleepyASTNode *node) {
+  if (!node)
+    return NULL;
+  switch (node->type) {
+  case SLEEPY_AST_STRING:
+  case SLEEPY_AST_LITERAL:
+  case SLEEPY_AST_SCALAR:
+  case SLEEPY_AST_ARRAY:
+  case SLEEPY_AST_HASHTABLE:
+  case SLEEPY_AST_IDENTIFIER:
+  case SLEEPY_AST_CLASS_LITERAL:
+    return node->as.string_val;
+  case SLEEPY_AST_ENV_BRIDGE:
+    return node->as.env_bridge.keyword;
+  case SLEEPY_AST_CALL:
+    if (node->as.call.target &&
+        node->as.call.target->type == SLEEPY_AST_IDENTIFIER) {
+      return node->as.call.target->as.string_val;
+    }
+    return NULL;
+  default:
+    return NULL;
+  }
+}
+
+long sleepy_ast_get_long(SleepyASTNode *node) {
+  if (node && node->type == SLEEPY_AST_LONG)
+    return node->as.long_val;
+  return 0;
+}
+
+double sleepy_ast_get_double(SleepyASTNode *node) {
+  if (node && node->type == SLEEPY_AST_NUMBER)
+    return node->as.double_val;
+  return 0.0;
+}
+
+bool sleepy_ast_get_bool(SleepyASTNode *node) {
+  if (node && node->type == SLEEPY_AST_BOOLEAN)
+    return node->as.boolean;
+  return false;
+}
+
 static void append_indent(SleepyStringBuffer *buffer, int depth) {
   for (int i = 0; i < depth; i++) {
     sleepy_string_buffer_append_string(buffer, "    ", 4);

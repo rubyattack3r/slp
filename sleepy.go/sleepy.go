@@ -12,72 +12,6 @@ static inline void set_go_allocator(SleepyAllocator* alloc) {
     alloc->user_data = NULL;
 }
 
-// Helper to extract a node's children generically since CGO struggles with unions
-static inline void get_node_children(SleepyASTNode* node, SleepyASTNode*** out_children, size_t* out_count) {
-    *out_children = NULL;
-    *out_count = 0;
-    if (!node) return;
-    
-    // Very simplified generic child extractor for basic AST walking
-    switch (node->type) {
-        case SLEEPY_AST_SCRIPT:
-        case SLEEPY_AST_BLOCK:
-            *out_children = node->as.block.statements;
-            *out_count = node->as.block.count;
-            break;
-        case SLEEPY_AST_CALL:
-            // Just returning args for simplicity in this example
-            *out_children = node->as.call.args;
-            *out_count = node->as.call.arg_count;
-            break;
-		case SLEEPY_AST_BINOP: {
-			static SleepyASTNode* binop_children[2];
-			binop_children[0] = node->as.binop.left;
-			binop_children[1] = node->as.binop.right;
-			*out_children = binop_children;
-			*out_count = 2;
-			break;
-		}
-		case SLEEPY_AST_ASSIGNMENT: {
-			static SleepyASTNode* assign_children[2];
-			assign_children[0] = node->as.assign.left;
-			assign_children[1] = node->as.assign.right;
-			*out_children = assign_children;
-			*out_count = 2;
-			break;
-		}
-		case SLEEPY_AST_ARG: {
-			static SleepyASTNode* arg_children[1];
-			arg_children[0] = node->as.arg.value;
-			*out_children = arg_children;
-			*out_count = 1;
-			break;
-		}
-		case SLEEPY_AST_ENV_BRIDGE: {
-			static SleepyASTNode* bridge_children[3];
-			size_t count = 0;
-			// We can't easily return static pointers from a switch if it's called recursively
-			// but for this simple mirror it's usually okay as long as we copy it immediately in Go.
-			// Actually, let's just create a small internal array.
-			if (node->as.env_bridge.body) {
-				bridge_children[count++] = node->as.env_bridge.body;
-			}
-			*out_children = bridge_children;
-			*out_count = count;
-			break;
-		}
-        default: break;
-    }
-}
-
-// Helpers to read union fields safely
-static inline const char* get_node_string(SleepyASTNode* node) {
-    return node->as.string_val;
-}
-static inline SleepyASTNode* get_call_target(SleepyASTNode* node) {
-    if (node->type == SLEEPY_AST_CALL) return node->as.call.target;
-    return NULL;
-}
 */
 import "C"
 import (
@@ -326,23 +260,20 @@ func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
 	C_type := cNode._type
 	switch C_type {
 	case C.SLEEPY_AST_BOOLEAN:
-		val := *(*C.bool)(unsafe.Pointer(&cNode.as[0]))
-		node.Value = bool(val)
+		node.Value = bool(C.sleepy_ast_get_bool(cNode))
 	case C.SLEEPY_AST_LONG:
-		val := *(*C.long)(unsafe.Pointer(&cNode.as[0]))
-		node.Value = int64(val)
+		node.Value = int64(C.sleepy_ast_get_long(cNode))
 	case C.SLEEPY_AST_NUMBER:
-		val := *(*C.double)(unsafe.Pointer(&cNode.as[0]))
-		node.Value = float64(val)
+		node.Value = float64(C.sleepy_ast_get_double(cNode))
 	case C.SLEEPY_AST_STRING, C.SLEEPY_AST_LITERAL, C.SLEEPY_AST_SCALAR,
 		C.SLEEPY_AST_ARRAY, C.SLEEPY_AST_HASHTABLE, C.SLEEPY_AST_IDENTIFIER,
 		C.SLEEPY_AST_CLASS_LITERAL:
-		val := *(**C.char)(unsafe.Pointer(&cNode.as[0]))
+		val := C.sleepy_ast_get_string(cNode)
 		if val != nil {
 			node.Value = C.GoString(val)
 		}
 	case C.SLEEPY_AST_ENV_BRIDGE:
-		val := *(**C.char)(unsafe.Pointer(&cNode.as[0]))
+		val := C.sleepy_ast_get_string(cNode)
 		if val != nil {
 			node.Value = C.GoString(val)
 		}
@@ -369,7 +300,7 @@ func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
 	// Extract children using C helper
 	var cChildren **C.SleepyASTNode
 	var cCount C.size_t
-	C.get_node_children(cNode, &cChildren, &cCount)
+	C.sleepy_ast_get_children(cNode, &cChildren, &cCount)
 
 	if cCount > 0 && cChildren != nil {
 		childrenSlice := unsafe.Slice(cChildren, int(cCount))
@@ -382,14 +313,12 @@ func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
 
 	// Specific extractions for needed components
 	if C_type == C.SLEEPY_AST_CALL {
-		target := C.get_call_target(cNode)
-		if target != nil && target._type == C.SLEEPY_AST_IDENTIFIER {
-			strVal := C.get_node_string(target)
-			if strVal != nil {
-				node.Value = C.GoString(strVal)
-			}
+		strVal := C.sleepy_ast_get_string(cNode) // We updated the C helper to return the target string for Calls
+		if strVal != nil {
+			node.Value = C.GoString(strVal)
 		}
 	}
 
 	return node
 }
+
