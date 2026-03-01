@@ -1763,7 +1763,7 @@ char *sleepy_ast_format(SleepyASTNode *node, SleepyAllocator *allocator) {
 // --- Bindings Helpers ---
 
 void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
-                             size_t *out_count) {
+                             size_t *out_count, SleepyAllocator *allocator) {
   *out_children = NULL;
   *out_count = 0;
   if (!node)
@@ -1771,49 +1771,252 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
 
   switch (node->type) {
   case SLEEPY_AST_SCRIPT:
-  case SLEEPY_AST_BLOCK:
-    *out_children = node->as.block.statements;
+  case SLEEPY_AST_BLOCK: {
+    if (node->as.block.count == 0)
+      break;
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, node->as.block.count * sizeof(SleepyASTNode *),
+        allocator->user_data);
+    for (size_t i = 0; i < node->as.block.count; i++) {
+      children[i] = node->as.block.statements[i];
+    }
+    *out_children = children;
     *out_count = node->as.block.count;
     break;
-  case SLEEPY_AST_CALL:
-    *out_children = node->as.call.args;
+  }
+  case SLEEPY_AST_CALL: {
+    if (node->as.call.arg_count == 0)
+      break;
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, node->as.call.arg_count * sizeof(SleepyASTNode *),
+        allocator->user_data);
+    for (size_t i = 0; i < node->as.call.arg_count; i++) {
+      children[i] = node->as.call.args[i];
+    }
+    *out_children = children;
     *out_count = node->as.call.arg_count;
     break;
+  }
   case SLEEPY_AST_BINOP: {
-    static SleepyASTNode *binop_children[2];
-    binop_children[0] = node->as.binop.left;
-    binop_children[1] = node->as.binop.right;
-    *out_children = binop_children;
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
+    children[0] = node->as.binop.left;
+    children[1] = node->as.binop.right;
+    *out_children = children;
     *out_count = 2;
     break;
   }
   case SLEEPY_AST_ASSIGNMENT: {
-    static SleepyASTNode *assign_children[2];
-    assign_children[0] = node->as.assign.left;
-    assign_children[1] = node->as.assign.right;
-    *out_children = assign_children;
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
+    children[0] = node->as.assign.left;
+    children[1] = node->as.assign.right;
+    *out_children = children;
     *out_count = 2;
     break;
   }
   case SLEEPY_AST_ARG: {
-    static SleepyASTNode *arg_children[1];
-    arg_children[0] = node->as.arg.value;
-    *out_children = arg_children;
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, 1 * sizeof(SleepyASTNode *), allocator->user_data);
+    children[0] = node->as.arg.value;
+    *out_children = children;
     *out_count = 1;
     break;
   }
   case SLEEPY_AST_ENV_BRIDGE: {
-    static SleepyASTNode *bridge_children[3];
-    size_t count = 0;
     if (node->as.env_bridge.body) {
-      bridge_children[count++] = node->as.env_bridge.body;
+      SleepyASTNode **children = allocator->reallocate(
+          NULL, 1 * sizeof(SleepyASTNode *), allocator->user_data);
+      children[0] = node->as.env_bridge.body;
+      *out_children = children;
+      *out_count = 1;
     }
-    *out_children = bridge_children;
-    *out_count = count;
+    break;
+  }
+  case SLEEPY_AST_IF: {
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, 3 * sizeof(SleepyASTNode *), allocator->user_data);
+    size_t count = 0;
+    if (node->as.if_stmt.condition)
+      children[count++] = node->as.if_stmt.condition;
+    if (node->as.if_stmt.then_branch)
+      children[count++] = node->as.if_stmt.then_branch;
+    if (node->as.if_stmt.else_branch)
+      children[count++] = node->as.if_stmt.else_branch;
+    if (count > 0) {
+      *out_children = children;
+      *out_count = count;
+    } else {
+      allocator->reallocate(children, 0, allocator->user_data);
+    }
+    break;
+  }
+  case SLEEPY_AST_WHILE: {
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
+    size_t count = 0;
+    if (node->as.while_stmt.condition)
+      children[count++] = node->as.while_stmt.condition;
+    if (node->as.while_stmt.body)
+      children[count++] = node->as.while_stmt.body;
+    if (count > 0) {
+      *out_children = children;
+      *out_count = count;
+    } else {
+      allocator->reallocate(children, 0, allocator->user_data);
+    }
+    break;
+  }
+  case SLEEPY_AST_FOR: {
+    size_t total_count =
+        node->as.for_stmt.init_count + 1 + node->as.for_stmt.inc_count + 1;
+    if (total_count == 0)
+      break;
+
+    // Use the allocator to allocate a temporary array of children
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, total_count * sizeof(SleepyASTNode *), allocator->user_data);
+    size_t count = 0;
+
+    for (size_t i = 0; i < node->as.for_stmt.init_count; i++) {
+      children[count++] = node->as.for_stmt.initializer[i];
+    }
+    if (node->as.for_stmt.condition) {
+      children[count++] = node->as.for_stmt.condition;
+    }
+    for (size_t i = 0; i < node->as.for_stmt.inc_count; i++) {
+      children[count++] = node->as.for_stmt.increment[i];
+    }
+    if (node->as.for_stmt.body) {
+      children[count++] = node->as.for_stmt.body;
+    }
+
+    if (count > 0) {
+      *out_children = children;
+      *out_count = count;
+    } else {
+      allocator->reallocate(children, 0, allocator->user_data);
+    }
+    break;
+  }
+  case SLEEPY_AST_FOREACH: {
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
+    size_t count = 0;
+    if (node->as.foreach.generator)
+      children[count++] = node->as.foreach.generator;
+    if (node->as.foreach.body)
+      children[count++] = node->as.foreach.body;
+    if (count > 0) {
+      *out_children = children;
+      *out_count = count;
+    } else {
+      allocator->reallocate(children, 0, allocator->user_data);
+    }
+    break;
+  }
+  case SLEEPY_AST_ASSIGN_LOOP: {
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
+    size_t count = 0;
+    if (node->as.assign_loop.generator)
+      children[count++] = node->as.assign_loop.generator;
+    if (node->as.assign_loop.body)
+      children[count++] = node->as.assign_loop.body;
+    if (count > 0) {
+      *out_children = children;
+      *out_count = count;
+    } else {
+      allocator->reallocate(children, 0, allocator->user_data);
+    }
+    break;
+  }
+  case SLEEPY_AST_INDEX: {
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
+    size_t count = 0;
+    if (node->as.index.container)
+      children[count++] = node->as.index.container;
+    if (node->as.index.element)
+      children[count++] = node->as.index.element;
+    if (count > 0) {
+      *out_children = children;
+      *out_count = count;
+    } else {
+      allocator->reallocate(children, 0, allocator->user_data);
+    }
+    break;
+  }
+  case SLEEPY_AST_OBJ_EXPR: {
+    size_t total_count = 2 + node->as.obj_expr.arg_count;
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, total_count * sizeof(SleepyASTNode *), allocator->user_data);
+    size_t count = 0;
+
+    if (node->as.obj_expr.target)
+      children[count++] = node->as.obj_expr.target;
+    if (node->as.obj_expr.message)
+      children[count++] = node->as.obj_expr.message;
+    for (size_t i = 0; i < node->as.obj_expr.arg_count; i++) {
+      children[count++] = node->as.obj_expr.args[i];
+    }
+
+    if (count > 0) {
+      *out_children = children;
+      *out_count = count;
+    } else {
+      allocator->reallocate(children, 0, allocator->user_data);
+    }
+    break;
+  }
+  case SLEEPY_AST_TRY_CATCH: {
+    SleepyASTNode **children = allocator->reallocate(
+        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
+    size_t count = 0;
+    if (node->as.try_catch.body)
+      children[count++] = node->as.try_catch.body;
+    if (node->as.try_catch.handler)
+      children[count++] = node->as.try_catch.handler;
+    if (count > 0) {
+      *out_children = children;
+      *out_count = count;
+    } else {
+      allocator->reallocate(children, 0, allocator->user_data);
+    }
+    break;
+  }
+  case SLEEPY_AST_RETURN:
+  case SLEEPY_AST_YIELD:
+  case SLEEPY_AST_THROW:
+  case SLEEPY_AST_ASSERT: {
+    if (node->as.control.value) {
+      SleepyASTNode **children = allocator->reallocate(
+          NULL, 1 * sizeof(SleepyASTNode *), allocator->user_data);
+      children[0] = node->as.control.value;
+      *out_children = children;
+      *out_count = 1;
+    }
+    break;
+  }
+  case SLEEPY_AST_UNARYOP: {
+    if (node->as.unaryop.operand) {
+      SleepyASTNode **children = allocator->reallocate(
+          NULL, 1 * sizeof(SleepyASTNode *), allocator->user_data);
+      children[0] = node->as.unaryop.operand;
+      *out_children = children;
+      *out_count = 1;
+    }
     break;
   }
   default:
     break;
+  }
+}
+
+void sleepy_ast_free_children(SleepyASTNode **children,
+                              SleepyAllocator *allocator) {
+  if (allocator && allocator->reallocate && children) {
+    allocator->reallocate(children, 0, allocator->user_data);
   }
 }
 

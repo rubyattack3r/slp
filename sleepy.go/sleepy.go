@@ -15,8 +15,15 @@ static inline void set_go_allocator(SleepyAllocator* alloc) {
 */
 import "C"
 import (
+	"errors"
 	"fmt"
 	"unsafe"
+)
+
+// Package-level errors
+var (
+	ErrParsingFailed       = errors.New("parsing failed")
+	ErrASTGenerationFailed = errors.New("could not generate AST")
 )
 
 //export goSleepyReallocInfo
@@ -45,7 +52,9 @@ func NewParser() *Parser {
 	}
 }
 
-func (p *Parser) Free() {
+// Close releases the C memory allocated for the parser and its allocator.
+// It implements the io.Closer interface.
+func (p *Parser) Close() error {
 	if p.cParser != nil {
 		C.free(unsafe.Pointer(p.cParser))
 		p.cParser = nil
@@ -54,11 +63,15 @@ func (p *Parser) Free() {
 		C.free(unsafe.Pointer(p.allocator))
 		p.allocator = nil
 	}
+	return nil
 }
+
+// NodeType represents the type of a Sleepy AST node
+type NodeType int
 
 // Node represents a Sleepy AST Node
 type Node struct {
-	Type     C.SleepyASTNodeType
+	Type     NodeType
 	Line     int
 	Value    interface{} // Mapped value based on Type
 	Children []*Node     // Child nodes for traversal
@@ -66,45 +79,129 @@ type Node struct {
 
 // AST Node Type Constants
 const (
-	AstBoolean    = C.SLEEPY_AST_BOOLEAN
-	AstLong       = C.SLEEPY_AST_LONG
-	AstNumber     = C.SLEEPY_AST_NUMBER
-	AstLiteral    = C.SLEEPY_AST_LITERAL
-	AstString     = C.SLEEPY_AST_STRING
-	AstScalar     = C.SLEEPY_AST_SCALAR
-	AstArray      = C.SLEEPY_AST_ARRAY
-	AstHashtable  = C.SLEEPY_AST_HASHTABLE
-	AstIdentifier = C.SLEEPY_AST_IDENTIFIER
-	AstBacktick   = C.SLEEPY_AST_BACKTICK
-	AstCall       = C.SLEEPY_AST_CALL
-	AstBinop      = C.SLEEPY_AST_BINOP
-	AstAssignment = C.SLEEPY_AST_ASSIGNMENT
-	AstUnaryop    = C.SLEEPY_AST_UNARYOP
-	AstIf         = C.SLEEPY_AST_IF
-	AstWhile      = C.SLEEPY_AST_WHILE
-	AstFor        = C.SLEEPY_AST_FOR
-	AstForeach    = C.SLEEPY_AST_FOREACH
-	AstReturn     = C.SLEEPY_AST_RETURN
-	AstBreak      = C.SLEEPY_AST_BREAK
-	AstContinue   = C.SLEEPY_AST_CONTINUE
-	AstYield      = C.SLEEPY_AST_YIELD
-	AstIndex      = C.SLEEPY_AST_INDEX
-	AstObjExpr    = C.SLEEPY_AST_OBJ_EXPR
-	AstTryCatch   = C.SLEEPY_AST_TRY_CATCH
-	AstThrow      = C.SLEEPY_AST_THROW
-	AstAssert     = C.SLEEPY_AST_ASSERT
-	AstEnvBridge  = C.SLEEPY_AST_ENV_BRIDGE
-	AstImport     = C.SLEEPY_AST_IMPORT
-	AstArg        = C.SLEEPY_AST_ARG
-	AstKvPair     = C.SLEEPY_AST_KV_PAIR
-	AstDone       = C.SLEEPY_AST_DONE
-	AstHalt       = C.SLEEPY_AST_HALT
-	AstLocal      = C.SLEEPY_AST_LOCAL
-	AstThis       = C.SLEEPY_AST_THIS
-	AstBlock      = C.SLEEPY_AST_BLOCK
-	AstScript     = C.SLEEPY_AST_SCRIPT
-	AstClassLiteral = C.SLEEPY_AST_CLASS_LITERAL
+	AstBoolean      NodeType = C.SLEEPY_AST_BOOLEAN
+	AstLong         NodeType = C.SLEEPY_AST_LONG
+	AstNumber       NodeType = C.SLEEPY_AST_NUMBER
+	AstLiteral      NodeType = C.SLEEPY_AST_LITERAL
+	AstString       NodeType = C.SLEEPY_AST_STRING
+	AstScalar       NodeType = C.SLEEPY_AST_SCALAR
+	AstArray        NodeType = C.SLEEPY_AST_ARRAY
+	AstHashtable    NodeType = C.SLEEPY_AST_HASHTABLE
+	AstIdentifier   NodeType = C.SLEEPY_AST_IDENTIFIER
+	AstBacktick     NodeType = C.SLEEPY_AST_BACKTICK
+	AstCall         NodeType = C.SLEEPY_AST_CALL
+	AstBinop        NodeType = C.SLEEPY_AST_BINOP
+	AstAssignment   NodeType = C.SLEEPY_AST_ASSIGNMENT
+	AstUnaryop      NodeType = C.SLEEPY_AST_UNARYOP
+	AstIf           NodeType = C.SLEEPY_AST_IF
+	AstWhile        NodeType = C.SLEEPY_AST_WHILE
+	AstFor          NodeType = C.SLEEPY_AST_FOR
+	AstForeach      NodeType = C.SLEEPY_AST_FOREACH
+	AstReturn       NodeType = C.SLEEPY_AST_RETURN
+	AstBreak        NodeType = C.SLEEPY_AST_BREAK
+	AstContinue     NodeType = C.SLEEPY_AST_CONTINUE
+	AstYield        NodeType = C.SLEEPY_AST_YIELD
+	AstIndex        NodeType = C.SLEEPY_AST_INDEX
+	AstObjExpr      NodeType = C.SLEEPY_AST_OBJ_EXPR
+	AstTryCatch     NodeType = C.SLEEPY_AST_TRY_CATCH
+	AstThrow        NodeType = C.SLEEPY_AST_THROW
+	AstAssert       NodeType = C.SLEEPY_AST_ASSERT
+	AstEnvBridge    NodeType = C.SLEEPY_AST_ENV_BRIDGE
+	AstImport       NodeType = C.SLEEPY_AST_IMPORT
+	AstArg          NodeType = C.SLEEPY_AST_ARG
+	AstKvPair       NodeType = C.SLEEPY_AST_KV_PAIR
+	AstDone         NodeType = C.SLEEPY_AST_DONE
+	AstHalt         NodeType = C.SLEEPY_AST_HALT
+	AstLocal        NodeType = C.SLEEPY_AST_LOCAL
+	AstThis         NodeType = C.SLEEPY_AST_THIS
+	AstBlock        NodeType = C.SLEEPY_AST_BLOCK
+	AstScript       NodeType = C.SLEEPY_AST_SCRIPT
+	AstClassLiteral NodeType = C.SLEEPY_AST_CLASS_LITERAL
 )
+
+// String implements the fmt.Stringer interface for NodeType
+func (n NodeType) String() string {
+	switch n {
+	case AstBoolean:
+		return "AstBoolean"
+	case AstLong:
+		return "AstLong"
+	case AstNumber:
+		return "AstNumber"
+	case AstLiteral:
+		return "AstLiteral"
+	case AstString:
+		return "AstString"
+	case AstScalar:
+		return "AstScalar"
+	case AstArray:
+		return "AstArray"
+	case AstHashtable:
+		return "AstHashtable"
+	case AstIdentifier:
+		return "AstIdentifier"
+	case AstBacktick:
+		return "AstBacktick"
+	case AstCall:
+		return "AstCall"
+	case AstBinop:
+		return "AstBinop"
+	case AstAssignment:
+		return "AstAssignment"
+	case AstUnaryop:
+		return "AstUnaryop"
+	case AstIf:
+		return "AstIf"
+	case AstWhile:
+		return "AstWhile"
+	case AstFor:
+		return "AstFor"
+	case AstForeach:
+		return "AstForeach"
+	case AstReturn:
+		return "AstReturn"
+	case AstBreak:
+		return "AstBreak"
+	case AstContinue:
+		return "AstContinue"
+	case AstYield:
+		return "AstYield"
+	case AstIndex:
+		return "AstIndex"
+	case AstObjExpr:
+		return "AstObjExpr"
+	case AstTryCatch:
+		return "AstTryCatch"
+	case AstThrow:
+		return "AstThrow"
+	case AstAssert:
+		return "AstAssert"
+	case AstEnvBridge:
+		return "AstEnvBridge"
+	case AstImport:
+		return "AstImport"
+	case AstArg:
+		return "AstArg"
+	case AstKvPair:
+		return "AstKvPair"
+	case AstDone:
+		return "AstDone"
+	case AstHalt:
+		return "AstHalt"
+	case AstLocal:
+		return "AstLocal"
+	case AstThis:
+		return "AstThis"
+	case AstBlock:
+		return "AstBlock"
+	case AstScript:
+		return "AstScript"
+	case AstClassLiteral:
+		return "AstClassLiteral"
+	default:
+		return fmt.Sprintf("UnknownNodeType(%d)", int(n))
+	}
+}
 
 // Parse parses the provided Sleepy source code and returns the root AST Node if successful.
 func (p *Parser) Parse(source string) (*Node, error) {
@@ -117,11 +214,11 @@ func (p *Parser) Parse(source string) (*Node, error) {
 	node := C.sleepy_parser_parse(p.cParser)
 
 	if p.cParser.had_error {
-		return nil, fmt.Errorf("parsing failed")
+		return nil, ErrParsingFailed
 	}
 
 	if node == nil {
-		return nil, fmt.Errorf("could not generate AST")
+		return nil, ErrASTGenerationFailed
 	}
 
 	return p.convertNode(node), nil
@@ -173,29 +270,42 @@ func (n *Node) formatNative() string {
 		}
 		return res
 	case AstBoolean:
-		if n.Value.(bool) {
-			return "$true"
+		if val, ok := n.Value.(bool); ok {
+			if val {
+				return "$true"
+			}
+			return "$false"
 		}
-		return "$false"
+		return "/* invalid bool */"
 	case AstLong:
-		return fmt.Sprintf("%dL", n.Value)
-	case AstNumber:
-		return fmt.Sprintf("%g", n.Value)
-	case AstString, AstLiteral:
-		return n.Value.(string)
-	case AstScalar:
-		return "$" + n.Value.(string)
-	case AstIdentifier, AstArray, AstHashtable, AstClassLiteral:
-		if n.Value == nil {
-			return "/* nil ID */"
+		if val, ok := n.Value.(int64); ok {
+			return fmt.Sprintf("%dL", val)
 		}
-		return n.Value.(string)
+		return "/* invalid long */"
+	case AstNumber:
+		if val, ok := n.Value.(float64); ok {
+			return fmt.Sprintf("%g", val)
+		}
+		return "/* invalid number */"
+	case AstString, AstLiteral:
+		if val, ok := n.Value.(string); ok {
+			return val
+		}
+		return "/* invalid string */"
+	case AstScalar:
+		if val, ok := n.Value.(string); ok {
+			return "$" + val
+		}
+		return "/* invalid scalar */"
+	case AstIdentifier, AstArray, AstHashtable, AstClassLiteral:
+		if val, ok := n.Value.(string); ok {
+			return val
+		}
+		return "/* nil ID */"
 	case AstCall:
-		target := ""
-		if n.Value != nil {
-			target = n.Value.(string)
-		} else {
-			target = "/* missing call target */"
+		target := "/* missing call target */"
+		if val, ok := n.Value.(string); ok {
+			target = val
 		}
 		res := target + "("
 		for i, child := range n.Children {
@@ -217,9 +327,25 @@ func (n *Node) formatNative() string {
 		}
 		return "/* invalid assign */"
 	case AstEnvBridge:
-		res := n.Value.(string)
+		res := "/* invalid env bridge */"
+		if val, ok := n.Value.(string); ok {
+			res = val
+		}
 		for _, child := range n.Children {
 			res += " " + child.formatNative()
+		}
+		return res
+	case AstIf:
+		res := "if ("
+		if len(n.Children) > 0 {
+			res += n.Children[0].formatNative()
+		}
+		res += ") "
+		if len(n.Children) > 1 {
+			res += n.Children[1].formatNative()
+		}
+		if len(n.Children) > 2 {
+			res += " else " + n.Children[2].formatNative()
 		}
 		return res
 	default:
@@ -249,7 +375,7 @@ func (p *Parser) convertNode(cNode *C.SleepyASTNode) *Node {
 	}
 
 	node := &Node{
-		Type: cNode._type,
+		Type: NodeType(cNode._type),
 		Line: int(cNode.line),
 	}
 
@@ -257,8 +383,8 @@ func (p *Parser) convertNode(cNode *C.SleepyASTNode) *Node {
 }
 
 func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
-	C_type := cNode._type
-	switch C_type {
+	cType := cNode._type
+	switch cType {
 	case C.SLEEPY_AST_BOOLEAN:
 		node.Value = bool(C.sleepy_ast_get_bool(cNode))
 	case C.SLEEPY_AST_LONG:
@@ -297,7 +423,7 @@ func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
 	// Extract children using C helper
 	var cChildren **C.SleepyASTNode
 	var cCount C.size_t
-	C.sleepy_ast_get_children(cNode, &cChildren, &cCount)
+	C.sleepy_ast_get_children(cNode, &cChildren, &cCount, p.allocator)
 
 	if cCount > 0 && cChildren != nil {
 		childrenSlice := unsafe.Slice(cChildren, int(cCount))
@@ -306,10 +432,14 @@ func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
 				node.Children = append(node.Children, p.convertNode(child))
 			}
 		}
+		// The array of pointers is dynamically allocated by the C helper
+		// using the SleepyAllocator, so we must free the array itself.
+		// (The actual AST nodes belong to the parser and are freed when it is freed).
+		C.sleepy_ast_free_children(cChildren, p.allocator)
 	}
 
 	// Specific extractions for needed components
-	if C_type == C.SLEEPY_AST_CALL {
+	if cType == C.SLEEPY_AST_CALL {
 		strVal := C.sleepy_ast_get_string(cNode) // We updated the C helper to return the target string for Calls
 		if strVal != nil {
 			node.Value = C.GoString(strVal)

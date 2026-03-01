@@ -436,7 +436,9 @@ char *sleepy_ast_format(SleepyASTNode *node, SleepyAllocator *allocator);
 
 // AST Helper Functions for Bindings
 void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
-                             size_t *out_count);
+                             size_t *out_count, SleepyAllocator *allocator);
+void sleepy_ast_free_children(SleepyASTNode **children,
+                              SleepyAllocator *allocator);
 const char *sleepy_ast_get_string(SleepyASTNode *node);
 long sleepy_ast_get_long(SleepyASTNode *node);
 double sleepy_ast_get_double(SleepyASTNode *node);

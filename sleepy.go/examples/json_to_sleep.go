@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 import (
@@ -26,6 +28,8 @@ func main() {
 	for k, v := range data {
 		// Represent each key-value pair as an assignment inside the block
 		// e.g. $k = "v";
+		parser := sleepy.NewParser()
+		defer parser.Close()
 		assign := &sleepy.Node{
 			Type: sleepy.AstAssignment,
 			Children: []*sleepy.Node{

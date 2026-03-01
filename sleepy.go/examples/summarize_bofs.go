@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 import (
@@ -92,7 +94,7 @@ func main() {
 	}
 
 	parser := sleepy.NewParser()
-	defer parser.Free()
+	defer parser.Close()
 
 	// Parse Sleepy Content
 	scriptNode, err := parser.Parse(string(content))
