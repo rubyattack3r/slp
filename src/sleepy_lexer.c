@@ -161,11 +161,15 @@ static SleepyTokenType identifier_type(SleepyLexer *lexer) {
         return CHECK_KEYWORD(2, 0, "", SLEEPY_TOKEN_IF);
       case 'm':
         return CHECK_KEYWORD(2, 4, "port", SLEEPY_TOKEN_IMPORT);
+      case 'l':
+        return CHECK_KEYWORD(2, 4, "ine", SLEEPY_TOKEN_INLINE);
+      case 'n':
+        return SLEEPY_TOKEN_ID;
       }
     }
     break;
   case 'p':
-    return CHECK_KEYWORD(1, 6, "rintln", SLEEPY_TOKEN_PRINTLN);
+    return SLEEPY_TOKEN_ID;
   case 'r':
     if (lexer->current - lexer->start > 1) {
       switch (lexer->start[1]) {
@@ -335,6 +339,15 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer) {
     }
     return make_token(lexer, SLEEPY_TOKEN_AT);
   case '\\':
+    if (peek(lexer) == '&') {
+      advance(lexer); // consume &
+      if (is_alpha(peek(lexer)) || peek(lexer) == '_') {
+        while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||
+               peek(lexer) == '_')
+          advance(lexer);
+        return make_token(lexer, SLEEPY_TOKEN_ADDRESS);
+      }
+    }
     if (peek(lexer) == '$' || peek(lexer) == '@' || peek(lexer) == '%') {
       advance(lexer); // consume symbol
       while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||

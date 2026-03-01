@@ -51,6 +51,8 @@ typedef enum {
   SLEEPY_AST_HALT,
   SLEEPY_AST_DONE,
   SLEEPY_AST_CALLCC,
+  SLEEPY_AST_LOCAL,
+  SLEEPY_AST_THIS,
   SLEEPY_AST_NOP,
   SLEEPY_AST_ERROR // For parse error nodes
 } SleepyASTNodeType;
@@ -164,7 +166,9 @@ struct SleepyASTNode {
 
     // Environment Bridge (keyword identifier string block)
     struct {
-      const char *name;
+      const char *keyword;
+      const char *identifier;
+      const char *string;
       struct SleepyASTNode *body;
     } env_bridge;
 
