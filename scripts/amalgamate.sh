@@ -3,6 +3,9 @@
 
 set -e
 
+# Ensure we are in the scripts directory so relative paths work
+cd "$(dirname "$0")"
+
 OUT_DIR="../dist"
 mkdir -p "$OUT_DIR"
 
@@ -31,7 +34,7 @@ cat << 'EOF' > "$HEADER_OUT"
 EOF
 
 # Add headers in dependency order. Filter out #include "..." 
-for f in ../include/sleepy_common.h ../include/sleepy_core.h ../include/sleepy_utils.h ../include/sleepy_lexer.h ../include/sleepy_parser.h; do
+for f in ../include/sleepy_common.h ../include/sleepy_core.h ../include/sleepy_utils.h ../include/sleepy_lexer.h ../include/sleepy_parser.h ../include/sleepy_ast.h; do
     echo "/* --- File: $f --- */" >> "$HEADER_OUT"
     # Remove #pragma once, #ifndef/#define guards at the top, and #include "..." local headers
     cat "$f" | egrep -v '^\s*#include\s+"' | egrep -v '^\s*#ifndef\s+SLEEPY_.*_H\s*$' | egrep -v '^\s*#define\s+SLEEPY_.*_H\s*$' | egrep -v '^\s*#endif\s*//\s*SLEEPY_.*_H\s*$' >> "$HEADER_OUT"
@@ -42,8 +45,9 @@ if [ "$SINGLE_HEADER" -eq 0 ]; then
     echo "#endif // SLEEPY_H" >> "$HEADER_OUT"
 fi
 
-	echo "Amalgamating sources into $SOURCE_OUT..."
-	cat << 'EOF' > "$SOURCE_OUT"
+if [ "$SINGLE_HEADER" -eq 0 ]; then
+    echo "Amalgamating sources into $SOURCE_OUT..."
+    cat << 'EOF' > "$SOURCE_OUT"
 /* 
  * Sleepy Amalgamated Source
  * Generated automatically.
@@ -53,7 +57,7 @@ fi
 EOF
 fi
 
-for f in ../src/sleepy_utils.c ../src/sleepy_lexer.c ../src/sleepy_parser.c; do
+for f in ../src/sleepy_utils.c ../src/sleepy_lexer.c ../src/sleepy_parser.c ../src/sleepy_ast.c; do
     if [ "$SINGLE_HEADER" -eq 1 ]; then
         echo "/* --- File: $f --- */" >> "$HEADER_OUT"
         cat "$f" | egrep -v '^\s*#include\s+"' >> "$HEADER_OUT"

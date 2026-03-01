@@ -4,7 +4,7 @@
  */
 #include "sleepy.h"
 
-/* --- File: src/sleepy_utils.c --- */
+/* --- File: ../src/sleepy_utils.c --- */
 
 void sleepy_string_buffer_init(SleepyStringBuffer *buffer,
                                SleepyAllocator *allocator) {
@@ -77,7 +77,8 @@ char *sleepy_utils_strcpy(char *dest, const char *src) {
   return dest;
 }
 
-/* --- File: src/sleepy_lexer.c --- */
+/* --- File: ../src/sleepy_lexer.c --- */
+#include <stdbool.h>
 #include <stdio.h>
 
 static bool is_digit(char c) { return c >= '0' && c <= '9'; }
@@ -630,7 +631,9 @@ const char *sleepy_lexer_copy_lexeme(SleepyLexer *lexer, SleepyToken *token) {
   return lexeme;
 }
 
-/* --- File: src/sleepy_parser.c --- */
+/* --- File: ../src/sleepy_parser.c --- */
+#include <stdbool.h>
+#include <stdlib.h>
 
 // Forward declarations
 static void advance(SleepyParser *parser);
@@ -840,9 +843,18 @@ static SleepyASTNode *number(SleepyParser *parser, SleepyASTNode *left,
                              bool canAssign) {
   (void)canAssign;
   (void)left;
-  SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_NUMBER);
-  node->as.double_val = 0; // stub
-  return node;
+  SleepyToken token = parser->previous;
+  const char *lexeme = sleepy_lexer_copy_lexeme(&parser->lexer, &token);
+
+  if (token.type == SLEEPY_TOKEN_LONG) {
+    SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_LONG);
+    node->as.long_val = strtoll(lexeme, NULL, 10);
+    return node;
+  } else {
+    SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_NUMBER);
+    node->as.double_val = strtod(lexeme, NULL);
+    return node;
+  }
 }
 
 static SleepyASTNode *literal(SleepyParser *parser, SleepyASTNode *left,
@@ -1102,6 +1114,10 @@ static SleepyASTNode *command(SleepyParser *parser, SleepyASTNode *left,
     type = SLEEPY_AST_LOCAL;
   else if (op.type == SLEEPY_TOKEN_THIS)
     type = SLEEPY_AST_THIS;
+  else if (op.type == SLEEPY_TOKEN_BREAK)
+    type = SLEEPY_AST_BREAK;
+  else if (op.type == SLEEPY_TOKEN_CONTINUE)
+    type = SLEEPY_AST_CONTINUE;
 
   SleepyASTNode *node = allocate_node(parser, type);
   node->as.control.value = NULL;
@@ -1501,6 +1517,8 @@ static SleepyASTNode *try_statement(SleepyParser *parser) {
 }
 
 static SleepyASTNode *statement(SleepyParser *parser) {
+  if (match(parser, SLEEPY_TOKEN_SEMICOLON))
+    return allocate_node(parser, SLEEPY_AST_NOP);
   if (match(parser, SLEEPY_TOKEN_IF))
     return if_statement(parser);
   if (match(parser, SLEEPY_TOKEN_WHILE))
@@ -1514,43 +1532,6 @@ static SleepyASTNode *statement(SleepyParser *parser) {
   if (check(parser, SLEEPY_TOKEN_LEFT_BRACE))
     return block(parser);
   return expression_statement(parser);
-}
-
-static SleepyASTNode *sub_declaration(SleepyParser *parser) {
-  SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_CALL);
-  // sub is essentially: sub = identifier(name, block)
-  SleepyASTNode *sub_id = allocate_node(parser, SLEEPY_AST_IDENTIFIER);
-  sub_id->as.string_val =
-      sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
-
-  // Get the function name
-  consume(parser, SLEEPY_TOKEN_ID, "Expect function name after 'sub'.");
-  SleepyASTNode *name = identifier(parser, NULL, false);
-
-  // Parse the body as a block
-  SleepyASTNode *body = block(parser);
-
-  // Consume the semicolon after the sub declaration
-  match(parser, SLEEPY_TOKEN_SEMICOLON);
-
-  // Create a call node: sub(name, body)
-  node->as.call.target = sub_id;
-  node->as.call.arg_count = 2;
-  node->as.call.args = (SleepyASTNode **)parser->allocator->reallocate(
-      NULL, sizeof(SleepyASTNode *) * 2, parser->allocator->user_data);
-
-  SleepyASTNode *arg1 = allocate_node(parser, SLEEPY_AST_ARG);
-  arg1->as.arg.name = NULL;
-  arg1->as.arg.value = name;
-
-  SleepyASTNode *arg2 = allocate_node(parser, SLEEPY_AST_ARG);
-  arg2->as.arg.name = NULL;
-  arg2->as.arg.value = body;
-
-  node->as.call.args[0] = arg1;
-  node->as.call.args[1] = arg2;
-
-  return node;
 }
 
 static SleepyASTNode *import_statement(SleepyParser *parser) {
@@ -1623,12 +1604,29 @@ static SleepyASTNode *import_statement(SleepyParser *parser) {
 }
 
 static SleepyASTNode *declaration(SleepyParser *parser) {
-  if (match(parser, SLEEPY_TOKEN_SUB)) {
-    return sub_declaration(parser);
+  if (match(parser, SLEEPY_TOKEN_SUB) || match(parser, SLEEPY_TOKEN_INLINE)) {
+    return bridge(parser, NULL, false);
   }
   if (match(parser, SLEEPY_TOKEN_IMPORT)) {
     return import_statement(parser);
   }
+
+  // Generic Bridge Detection: ID [ID|STRING|LITERAL]? {
+  if (check(parser, SLEEPY_TOKEN_ID)) {
+    const char *saved_current = parser->lexer.current;
+    int saved_line = parser->lexer.line;
+    SleepyToken next = sleepy_lexer_scan_token(&parser->lexer);
+    parser->lexer.current = saved_current;
+    parser->lexer.line = saved_line;
+
+    if (next.type == SLEEPY_TOKEN_ID || next.type == SLEEPY_TOKEN_STRING ||
+        next.type == SLEEPY_TOKEN_LITERAL ||
+        next.type == SLEEPY_TOKEN_LEFT_BRACE) {
+      advance(parser); // Consume the keyword identifier
+      return bridge(parser, NULL, false);
+    }
+  }
+
   return statement(parser);
 }
 
@@ -1738,5 +1736,404 @@ SleepyASTNode *sleepy_parser_parse(SleepyParser *parser) {
     }
   }
   return script;
+}
+
+/* --- File: ../src/sleepy_ast.c --- */
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
+
+// Forward declaration of internal recursive formatter
+static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
+                        int depth);
+
+char *sleepy_ast_format(SleepyASTNode *node, SleepyAllocator *allocator) {
+  if (!node || !allocator)
+    return NULL;
+
+  SleepyStringBuffer buffer;
+  sleepy_string_buffer_init(&buffer, allocator);
+
+  format_node(node, &buffer, 0);
+
+  // Return the formatted string; caller assumes ownership.
+  return buffer.data;
+}
+
+static void append_indent(SleepyStringBuffer *buffer, int depth) {
+  for (int i = 0; i < depth; i++) {
+    sleepy_string_buffer_append_string(buffer, "    ", 4);
+  }
+}
+
+static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
+                        int depth) {
+  if (!node)
+    return;
+
+  switch (node->type) {
+  case SLEEPY_AST_SCRIPT: {
+    for (size_t i = 0; i < node->as.block.count; i++) {
+      format_node(node->as.block.statements[i], buffer, depth);
+      if (i < node->as.block.count - 1) {
+        if (node->as.block.statements[i]->type != SLEEPY_AST_ENV_BRIDGE) {
+          sleepy_string_buffer_append_char(buffer, ';');
+        }
+        sleepy_string_buffer_append_char(buffer, '\n');
+      }
+    }
+    break;
+  }
+
+  case SLEEPY_AST_BLOCK: {
+    sleepy_string_buffer_append_string(buffer, "{\n", 2);
+    for (size_t i = 0; i < node->as.block.count; i++) {
+      append_indent(buffer, depth + 1);
+      format_node(node->as.block.statements[i], buffer, depth + 1);
+      if (node->as.block.statements[i]->type != SLEEPY_AST_ENV_BRIDGE &&
+          node->as.block.statements[i]->type != SLEEPY_AST_IF &&
+          node->as.block.statements[i]->type != SLEEPY_AST_WHILE &&
+          node->as.block.statements[i]->type != SLEEPY_AST_FOR &&
+          node->as.block.statements[i]->type != SLEEPY_AST_FOREACH) {
+        sleepy_string_buffer_append_char(buffer, ';');
+      }
+      sleepy_string_buffer_append_char(buffer, '\n');
+    }
+    append_indent(buffer, depth);
+    sleepy_string_buffer_append_char(buffer, '}');
+    break;
+  }
+
+  case SLEEPY_AST_BOOLEAN: {
+    if (node->as.boolean) {
+      sleepy_string_buffer_append_string(buffer, "true", 4);
+    } else {
+      sleepy_string_buffer_append_string(buffer, "false", 5);
+    }
+    break;
+  }
+
+  case SLEEPY_AST_NULL: {
+    sleepy_string_buffer_append_string(buffer, "$null", 5);
+    break;
+  }
+
+  case SLEEPY_AST_LONG: {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%ldL", node->as.long_val);
+    sleepy_string_buffer_append_string(buffer, buf, sleepy_utils_strlen(buf));
+    break;
+  }
+
+  case SLEEPY_AST_NUMBER: {
+    char buf[64];
+    // Use %g for nice double formatting
+    snprintf(buf, sizeof(buf), "%g", node->as.double_val);
+    sleepy_string_buffer_append_string(buffer, buf, sleepy_utils_strlen(buf));
+    break;
+  }
+
+  case SLEEPY_AST_LITERAL:
+  case SLEEPY_AST_STRING: {
+    // Parser already includes quotes
+    sleepy_string_buffer_append_string(
+        buffer, node->as.string_val, sleepy_utils_strlen(node->as.string_val));
+    break;
+  }
+
+  case SLEEPY_AST_SCALAR: {
+    sleepy_string_buffer_append_char(buffer, '$');
+    sleepy_string_buffer_append_string(
+        buffer, node->as.string_val, sleepy_utils_strlen(node->as.string_val));
+    break;
+  }
+
+  case SLEEPY_AST_IDENTIFIER:
+  case SLEEPY_AST_ARRAY:
+  case SLEEPY_AST_HASHTABLE:
+  case SLEEPY_AST_CLASS_LITERAL: {
+    sleepy_string_buffer_append_string(
+        buffer, node->as.string_val, sleepy_utils_strlen(node->as.string_val));
+    break;
+  }
+
+  case SLEEPY_AST_BACKTICK: {
+    sleepy_string_buffer_append_char(buffer, '`');
+    sleepy_string_buffer_append_string(
+        buffer, node->as.string_val, sleepy_utils_strlen(node->as.string_val));
+    sleepy_string_buffer_append_char(buffer, '`');
+    break;
+  }
+
+  case SLEEPY_AST_CALL: {
+    format_node(node->as.call.target, buffer, depth);
+    sleepy_string_buffer_append_char(buffer, '(');
+    for (size_t i = 0; i < node->as.call.arg_count; i++) {
+      format_node(node->as.call.args[i], buffer, depth);
+      if (i < node->as.call.arg_count - 1) {
+        sleepy_string_buffer_append_string(buffer, ", ", 2);
+      }
+    }
+    sleepy_string_buffer_append_char(buffer, ')');
+    break;
+  }
+
+  case SLEEPY_AST_BINOP: {
+    format_node(node->as.binop.left, buffer, depth);
+    sleepy_string_buffer_append_char(buffer, ' ');
+    if (node->as.binop.negate) {
+      sleepy_string_buffer_append_char(buffer, '!');
+    }
+    sleepy_string_buffer_append_string(buffer, node->as.binop.op.start,
+                                       node->as.binop.op.length);
+    sleepy_string_buffer_append_char(buffer, ' ');
+    format_node(node->as.binop.right, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_ASSIGNMENT: {
+    format_node(node->as.assign.left, buffer, depth);
+    sleepy_string_buffer_append_char(buffer, ' ');
+    sleepy_string_buffer_append_string(buffer, node->as.assign.op.start,
+                                       node->as.assign.op.length);
+    sleepy_string_buffer_append_char(buffer, ' ');
+    format_node(node->as.assign.right, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_UNARYOP: {
+    // Very basic check for post ops
+    bool is_post = (node->as.unaryop.op.start[0] == '+' ||
+                    node->as.unaryop.op.start[0] == '-') &&
+                   (node->as.unaryop.op.length == 2) && (depth > 0);
+    if (!is_post) {
+      sleepy_string_buffer_append_string(buffer, node->as.unaryop.op.start,
+                                         node->as.unaryop.op.length);
+    }
+    format_node(node->as.unaryop.operand, buffer, depth);
+    if (is_post) {
+      sleepy_string_buffer_append_string(buffer, node->as.unaryop.op.start,
+                                         node->as.unaryop.op.length);
+    }
+    break;
+  }
+
+  case SLEEPY_AST_IF: {
+    sleepy_string_buffer_append_string(buffer, "if (", 4);
+    format_node(node->as.if_stmt.condition, buffer, depth);
+    sleepy_string_buffer_append_string(buffer, ") ", 2);
+    format_node(node->as.if_stmt.then_branch, buffer, depth);
+    if (node->as.if_stmt.else_branch) {
+      sleepy_string_buffer_append_string(buffer, " else ", 6);
+      format_node(node->as.if_stmt.else_branch, buffer, depth);
+    }
+    break;
+  }
+
+  case SLEEPY_AST_WHILE: {
+    sleepy_string_buffer_append_string(buffer, "while (", 7);
+    format_node(node->as.while_stmt.condition, buffer, depth);
+    sleepy_string_buffer_append_string(buffer, ") ", 2);
+    format_node(node->as.while_stmt.body, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_FOR: {
+    sleepy_string_buffer_append_string(buffer, "for (", 5);
+    for (size_t i = 0; i < node->as.for_stmt.init_count; i++) {
+      format_node(node->as.for_stmt.initializer[i], buffer, depth);
+      if (i < node->as.for_stmt.init_count - 1) {
+        sleepy_string_buffer_append_string(buffer, ", ", 2);
+      }
+    }
+    sleepy_string_buffer_append_string(buffer, "; ", 2);
+    format_node(node->as.for_stmt.condition, buffer, depth);
+    sleepy_string_buffer_append_string(buffer, "; ", 2);
+    for (size_t i = 0; i < node->as.for_stmt.inc_count; i++) {
+      format_node(node->as.for_stmt.increment[i], buffer, depth);
+      if (i < node->as.for_stmt.inc_count - 1) {
+        sleepy_string_buffer_append_string(buffer, ", ", 2);
+      }
+    }
+    sleepy_string_buffer_append_string(buffer, ") ", 2);
+    format_node(node->as.for_stmt.body, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_FOREACH: {
+    sleepy_string_buffer_append_string(buffer, "foreach ", 8);
+    if (node->as.foreach.index) {
+      sleepy_string_buffer_append_string(
+          buffer, node->as.foreach.index,
+          sleepy_utils_strlen(node->as.foreach.index));
+      sleepy_string_buffer_append_string(buffer, " => ", 4);
+    }
+    sleepy_string_buffer_append_string(
+        buffer, node->as.foreach.value,
+        sleepy_utils_strlen(node->as.foreach.value));
+    sleepy_string_buffer_append_string(buffer, " (", 2);
+    format_node(node->as.foreach.generator, buffer, depth);
+    sleepy_string_buffer_append_string(buffer, ") ", 2);
+    format_node(node->as.foreach.body, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_RETURN: {
+    sleepy_string_buffer_append_string(buffer, "return", 6);
+    if (node->as.control.value) {
+      sleepy_string_buffer_append_char(buffer, ' ');
+      format_node(node->as.control.value, buffer, depth);
+    }
+    break;
+  }
+
+  case SLEEPY_AST_BREAK: {
+    sleepy_string_buffer_append_string(buffer, "break", 5);
+    break;
+  }
+
+  case SLEEPY_AST_CONTINUE: {
+    sleepy_string_buffer_append_string(buffer, "continue", 8);
+    break;
+  }
+
+  case SLEEPY_AST_YIELD: {
+    sleepy_string_buffer_append_string(buffer, "yield", 5);
+    if (node->as.control.value) {
+      sleepy_string_buffer_append_char(buffer, ' ');
+      format_node(node->as.control.value, buffer, depth);
+    }
+    break;
+  }
+
+  case SLEEPY_AST_INDEX: {
+    format_node(node->as.index.container, buffer, depth);
+    sleepy_string_buffer_append_char(buffer, '[');
+    format_node(node->as.index.element, buffer, depth);
+    sleepy_string_buffer_append_char(buffer, ']');
+    break;
+  }
+
+  case SLEEPY_AST_OBJ_EXPR: {
+    sleepy_string_buffer_append_char(buffer, '[');
+    format_node(node->as.obj_expr.target, buffer, depth);
+    if (node->as.obj_expr.message) {
+      sleepy_string_buffer_append_char(buffer, ' ');
+      format_node(node->as.obj_expr.message, buffer, depth);
+    }
+    if (node->as.obj_expr.arg_count > 0) {
+      sleepy_string_buffer_append_string(buffer, ": ", 2);
+      for (size_t i = 0; i < node->as.obj_expr.arg_count; i++) {
+        format_node(node->as.obj_expr.args[i], buffer, depth);
+        if (i < node->as.obj_expr.arg_count - 1) {
+          sleepy_string_buffer_append_string(buffer, ", ", 2);
+        }
+      }
+    }
+    sleepy_string_buffer_append_char(buffer, ']');
+    break;
+  }
+
+  case SLEEPY_AST_TRY_CATCH: {
+    sleepy_string_buffer_append_string(buffer, "try ", 4);
+    format_node(node->as.try_catch.body, buffer, depth);
+    sleepy_string_buffer_append_string(buffer, " catch ", 7);
+    sleepy_string_buffer_append_string(
+        buffer, node->as.try_catch.value,
+        sleepy_utils_strlen(node->as.try_catch.value));
+    sleepy_string_buffer_append_char(buffer, ' ');
+    format_node(node->as.try_catch.handler, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_THROW: {
+    sleepy_string_buffer_append_string(buffer, "throw ", 6);
+    format_node(node->as.control.value, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_ASSERT: {
+    sleepy_string_buffer_append_string(buffer, "assert ", 7);
+    format_node(node->as.control.value, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_ENV_BRIDGE: {
+    sleepy_string_buffer_append_string(
+        buffer, node->as.env_bridge.keyword,
+        sleepy_utils_strlen(node->as.env_bridge.keyword));
+    if (node->as.env_bridge.identifier) {
+      sleepy_string_buffer_append_char(buffer, ' ');
+      sleepy_string_buffer_append_string(
+          buffer, node->as.env_bridge.identifier,
+          sleepy_utils_strlen(node->as.env_bridge.identifier));
+    }
+    if (node->as.env_bridge.string) {
+      sleepy_string_buffer_append_char(buffer, ' ');
+      sleepy_string_buffer_append_string(
+          buffer, node->as.env_bridge.string,
+          sleepy_utils_strlen(node->as.env_bridge.string));
+    }
+    if (node->as.env_bridge.body) {
+      sleepy_string_buffer_append_char(buffer, ' ');
+      format_node(node->as.env_bridge.body, buffer, depth);
+    }
+    break;
+  }
+
+  case SLEEPY_AST_IMPORT: {
+    sleepy_string_buffer_append_string(buffer, "import ", 7);
+    sleepy_string_buffer_append_string(
+        buffer, node->as.import_stmt.target,
+        sleepy_utils_strlen(node->as.import_stmt.target));
+    if (node->as.import_stmt.path) {
+      sleepy_string_buffer_append_string(buffer, " from: ", 7);
+      sleepy_string_buffer_append_string(
+          buffer, node->as.import_stmt.path,
+          sleepy_utils_strlen(node->as.import_stmt.path));
+    }
+    break;
+  }
+
+  case SLEEPY_AST_KV_PAIR:
+  case SLEEPY_AST_ARG: {
+    if (node->type == SLEEPY_AST_KV_PAIR && node->as.arg.name) {
+      format_node(node->as.arg.name, buffer, depth);
+      sleepy_string_buffer_append_string(buffer, " => ", 4);
+    }
+    format_node(node->as.arg.value, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_DONE: {
+    sleepy_string_buffer_append_string(buffer, "done", 4);
+    break;
+  }
+
+  case SLEEPY_AST_HALT: {
+    sleepy_string_buffer_append_string(buffer, "halt", 4);
+    break;
+  }
+
+  case SLEEPY_AST_LOCAL: {
+    sleepy_string_buffer_append_string(buffer, "local ", 6);
+    format_node(node->as.control.value, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_THIS: {
+    sleepy_string_buffer_append_string(buffer, "this ", 5);
+    format_node(node->as.control.value, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_NOP: {
+    break;
+  }
+
+  default:
+    sleepy_string_buffer_append_string(buffer, "/* unknown node type */", 23);
+    break;
+  }
 }
 

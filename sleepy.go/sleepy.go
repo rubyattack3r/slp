@@ -53,6 +53,19 @@ static inline void get_node_children(SleepyASTNode* node, SleepyASTNode*** out_c
 			*out_count = 1;
 			break;
 		}
+		case SLEEPY_AST_ENV_BRIDGE: {
+			static SleepyASTNode* bridge_children[3];
+			size_t count = 0;
+			// We can't easily return static pointers from a switch if it's called recursively
+			// but for this simple mirror it's usually okay as long as we copy it immediately in Go.
+			// Actually, let's just create a small internal array.
+			if (node->as.env_bridge.body) {
+				bridge_children[count++] = node->as.env_bridge.body;
+			}
+			*out_children = bridge_children;
+			*out_count = count;
+			break;
+		}
         default: break;
     }
 }
@@ -119,11 +132,44 @@ type Node struct {
 
 // AST Node Type Constants
 const (
-	AstLiteral = C.SLEEPY_AST_LITERAL
-	AstString  = C.SLEEPY_AST_STRING
-	AstBinop   = C.SLEEPY_AST_BINOP
-	AstCall    = C.SLEEPY_AST_CALL
-	AstArg     = C.SLEEPY_AST_ARG
+	AstBoolean    = C.SLEEPY_AST_BOOLEAN
+	AstLong       = C.SLEEPY_AST_LONG
+	AstNumber     = C.SLEEPY_AST_NUMBER
+	AstLiteral    = C.SLEEPY_AST_LITERAL
+	AstString     = C.SLEEPY_AST_STRING
+	AstScalar     = C.SLEEPY_AST_SCALAR
+	AstArray      = C.SLEEPY_AST_ARRAY
+	AstHashtable  = C.SLEEPY_AST_HASHTABLE
+	AstIdentifier = C.SLEEPY_AST_IDENTIFIER
+	AstBacktick   = C.SLEEPY_AST_BACKTICK
+	AstCall       = C.SLEEPY_AST_CALL
+	AstBinop      = C.SLEEPY_AST_BINOP
+	AstAssignment = C.SLEEPY_AST_ASSIGNMENT
+	AstUnaryop    = C.SLEEPY_AST_UNARYOP
+	AstIf         = C.SLEEPY_AST_IF
+	AstWhile      = C.SLEEPY_AST_WHILE
+	AstFor        = C.SLEEPY_AST_FOR
+	AstForeach    = C.SLEEPY_AST_FOREACH
+	AstReturn     = C.SLEEPY_AST_RETURN
+	AstBreak      = C.SLEEPY_AST_BREAK
+	AstContinue   = C.SLEEPY_AST_CONTINUE
+	AstYield      = C.SLEEPY_AST_YIELD
+	AstIndex      = C.SLEEPY_AST_INDEX
+	AstObjExpr    = C.SLEEPY_AST_OBJ_EXPR
+	AstTryCatch   = C.SLEEPY_AST_TRY_CATCH
+	AstThrow      = C.SLEEPY_AST_THROW
+	AstAssert     = C.SLEEPY_AST_ASSERT
+	AstEnvBridge  = C.SLEEPY_AST_ENV_BRIDGE
+	AstImport     = C.SLEEPY_AST_IMPORT
+	AstArg        = C.SLEEPY_AST_ARG
+	AstKvPair     = C.SLEEPY_AST_KV_PAIR
+	AstDone       = C.SLEEPY_AST_DONE
+	AstHalt       = C.SLEEPY_AST_HALT
+	AstLocal      = C.SLEEPY_AST_LOCAL
+	AstThis       = C.SLEEPY_AST_THIS
+	AstBlock      = C.SLEEPY_AST_BLOCK
+	AstScript     = C.SLEEPY_AST_SCRIPT
+	AstClassLiteral = C.SLEEPY_AST_CLASS_LITERAL
 )
 
 // Parse parses the provided Sleepy source code and returns the root AST Node if successful.
@@ -132,7 +178,7 @@ func (p *Parser) Parse(source string) (*Node, error) {
 	defer C.free(unsafe.Pointer(cSource))
 
 	C.sleepy_parser_init(p.cParser, cSource, p.allocator)
-	
+
 	// Parse the code
 	node := C.sleepy_parser_parse(p.cParser)
 
@@ -147,6 +193,121 @@ func (p *Parser) Parse(source string) (*Node, error) {
 	return p.convertNode(node), nil
 }
 
+// Format serializes the AST node back into Sleepy source code.
+func (n *Node) Format() string {
+	if n == nil {
+		return ""
+	}
+
+	// We'll use a temporary allocator for formatting
+	alloc := (*C.SleepyAllocator)(C.malloc(C.sizeof_SleepyAllocator))
+	C.set_go_allocator(alloc)
+	defer C.free(unsafe.Pointer(alloc))
+
+	// We need to reconstruct a C AST node for the unparser
+	// Since our Go Node is a mirror, this is complex if we want to support 
+	// round-tripping modified Go nodes back to C.
+	// For now, let's implement a Go-native Formatter to make it easier to 
+	// manipulate the AST in Go and still print it.
+	return n.formatNative()
+}
+
+func (n *Node) formatNative() string {
+	if n == nil {
+		return ""
+	}
+	switch n.Type {
+	case AstScript, AstBlock:
+		res := ""
+		if n.Type == AstBlock {
+			res += "{\n"
+		}
+		for i, child := range n.Children {
+			if n.Type == AstBlock {
+				res += "    "
+			}
+			res += child.formatNative()
+			if child.Type != AstEnvBridge && child.Type != AstIf && child.Type != AstWhile && child.Type != AstFor && child.Type != AstForeach {
+				res += ";"
+			}
+			if i < len(n.Children)-1 || n.Type == AstBlock {
+				res += "\n"
+			}
+		}
+		if n.Type == AstBlock {
+			res += "}"
+		}
+		return res
+	case AstBoolean:
+		if n.Value.(bool) {
+			return "$true"
+		}
+		return "$false"
+	case AstLong:
+		return fmt.Sprintf("%dL", n.Value)
+	case AstNumber:
+		return fmt.Sprintf("%g", n.Value)
+	case AstString, AstLiteral:
+		return n.Value.(string)
+	case AstScalar:
+		return "$" + n.Value.(string)
+	case AstIdentifier, AstArray, AstHashtable, AstClassLiteral:
+		if n.Value == nil {
+			return "/* nil ID */"
+		}
+		return n.Value.(string)
+	case AstCall:
+		target := ""
+		if n.Value != nil {
+			target = n.Value.(string)
+		} else {
+			target = "/* missing call target */"
+		}
+		res := target + "("
+		for i, child := range n.Children {
+			res += child.formatNative()
+			if i < len(n.Children)-1 {
+				res += ", "
+			}
+		}
+		res += ")"
+		return res
+	case AstArg:
+		if len(n.Children) > 0 {
+			return n.Children[0].formatNative()
+		}
+		return ""
+	case AstAssignment:
+		if len(n.Children) == 2 {
+			return n.Children[0].formatNative() + " = " + n.Children[1].formatNative()
+		}
+		return "/* invalid assign */"
+	case AstEnvBridge:
+		res := n.Value.(string)
+		for _, child := range n.Children {
+			res += " " + child.formatNative()
+		}
+		return res
+	default:
+		return fmt.Sprintf("/* format not implemented for type %d */", n.Type)
+	}
+}
+
+// Walk traverses the AST and applies the provided function to each node.
+func (n *Node) Walk(fn func(*Node) *Node) *Node {
+	if n == nil {
+		return nil
+	}
+
+	// Apply function to children first (bottom-up)
+	for i, child := range n.Children {
+		n.Children[i] = child.Walk(fn)
+	}
+
+	// Apply function to the node itself
+	return fn(n)
+}
+
 // Helper to convert C.SleepyASTNode to Go Node
 func (p *Parser) convertNode(cNode *C.SleepyASTNode) *Node {
 	if cNode == nil {
@@ -157,14 +318,11 @@ func (p *Parser) convertNode(cNode *C.SleepyASTNode) *Node {
 		Type: cNode._type,
 		Line: int(cNode.line),
 	}
-	
-	// Add AST conversion logic here based on node._type
+
 	return p.mapNodeData(cNode, node)
 }
 
 func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
-	// Since Go can't safely access C unions without knowing the active member
-	// we map them carefully based on the Type.
 	C_type := cNode._type
 	switch C_type {
 	case C.SLEEPY_AST_BOOLEAN:
@@ -183,6 +341,29 @@ func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
 		if val != nil {
 			node.Value = C.GoString(val)
 		}
+	case C.SLEEPY_AST_ENV_BRIDGE:
+		val := *(**C.char)(unsafe.Pointer(&cNode.as[0]))
+		if val != nil {
+			node.Value = C.GoString(val)
+		}
+		// Manually extract identifier and string if they exist
+		// Since CGO struggles with unions, we use offsets or helpers
+		// identifier is at as.env_bridge.identifier
+		// We'll add them as synthetic children for the Go mirror
+		id_ptr := *(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(&cNode.as[0])) + unsafe.Sizeof(uintptr(0))))
+		if id_ptr != nil {
+			node.Children = append([]*Node{{
+				Type:  AstIdentifier,
+				Value: C.GoString(id_ptr),
+			}}, node.Children...)
+		}
+		str_ptr := *(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(&cNode.as[0])) + 2*unsafe.Sizeof(uintptr(0))))
+		if str_ptr != nil {
+			node.Children = append([]*Node{{
+				Type:  AstString,
+				Value: C.GoString(str_ptr),
+			}}, node.Children...)
+		}
 	}
 
 	// Extract children using C helper
@@ -198,14 +379,13 @@ func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
 			}
 		}
 	}
-	
+
 	// Specific extractions for needed components
 	if C_type == C.SLEEPY_AST_CALL {
 		target := C.get_call_target(cNode)
 		if target != nil && target._type == C.SLEEPY_AST_IDENTIFIER {
 			strVal := C.get_node_string(target)
 			if strVal != nil {
-				// We overload Value for CALL to be the target string name if available
 				node.Value = C.GoString(strVal)
 			}
 		}

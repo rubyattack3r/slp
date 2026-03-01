@@ -1,0 +1,9 @@
+sub main {
+    println("Opening file...");
+    $handle = openf("data.txt");
+    $data = readAll($handle);
+    closef($handle);
+    println("Done.");
+}
+
+main();

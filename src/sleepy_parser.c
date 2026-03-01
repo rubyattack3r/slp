@@ -1,5 +1,7 @@
 #include "sleepy_parser.h"
 #include "sleepy_utils.h"
+#include <stdbool.h>
+#include <stdlib.h>
 
 // Forward declarations
 static void advance(SleepyParser *parser);
@@ -209,9 +211,18 @@ static SleepyASTNode *number(SleepyParser *parser, SleepyASTNode *left,
                              bool canAssign) {
   (void)canAssign;
   (void)left;
-  SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_NUMBER);
-  node->as.double_val = 0; // stub
-  return node;
+  SleepyToken token = parser->previous;
+  const char *lexeme = sleepy_lexer_copy_lexeme(&parser->lexer, &token);
+
+  if (token.type == SLEEPY_TOKEN_LONG) {
+    SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_LONG);
+    node->as.long_val = strtoll(lexeme, NULL, 10);
+    return node;
+  } else {
+    SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_NUMBER);
+    node->as.double_val = strtod(lexeme, NULL);
+    return node;
+  }
 }
 
 static SleepyASTNode *literal(SleepyParser *parser, SleepyASTNode *left,
@@ -471,6 +482,10 @@ static SleepyASTNode *command(SleepyParser *parser, SleepyASTNode *left,
     type = SLEEPY_AST_LOCAL;
   else if (op.type == SLEEPY_TOKEN_THIS)
     type = SLEEPY_AST_THIS;
+  else if (op.type == SLEEPY_TOKEN_BREAK)
+    type = SLEEPY_AST_BREAK;
+  else if (op.type == SLEEPY_TOKEN_CONTINUE)
+    type = SLEEPY_AST_CONTINUE;
 
   SleepyASTNode *node = allocate_node(parser, type);
   node->as.control.value = NULL;
@@ -870,6 +885,8 @@ static SleepyASTNode *try_statement(SleepyParser *parser) {
 }
 
 static SleepyASTNode *statement(SleepyParser *parser) {
+  if (match(parser, SLEEPY_TOKEN_SEMICOLON))
+    return allocate_node(parser, SLEEPY_AST_NOP);
   if (match(parser, SLEEPY_TOKEN_IF))
     return if_statement(parser);
   if (match(parser, SLEEPY_TOKEN_WHILE))
@@ -883,43 +900,6 @@ static SleepyASTNode *statement(SleepyParser *parser) {
   if (check(parser, SLEEPY_TOKEN_LEFT_BRACE))
     return block(parser);
   return expression_statement(parser);
-}
-
-static SleepyASTNode *sub_declaration(SleepyParser *parser) {
-  SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_CALL);
-  // sub is essentially: sub = identifier(name, block)
-  SleepyASTNode *sub_id = allocate_node(parser, SLEEPY_AST_IDENTIFIER);
-  sub_id->as.string_val =
-      sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
-
-  // Get the function name
-  consume(parser, SLEEPY_TOKEN_ID, "Expect function name after 'sub'.");
-  SleepyASTNode *name = identifier(parser, NULL, false);
-
-  // Parse the body as a block
-  SleepyASTNode *body = block(parser);
-
-  // Consume the semicolon after the sub declaration
-  match(parser, SLEEPY_TOKEN_SEMICOLON);
-
-  // Create a call node: sub(name, body)
-  node->as.call.target = sub_id;
-  node->as.call.arg_count = 2;
-  node->as.call.args = (SleepyASTNode **)parser->allocator->reallocate(
-      NULL, sizeof(SleepyASTNode *) * 2, parser->allocator->user_data);
-
-  SleepyASTNode *arg1 = allocate_node(parser, SLEEPY_AST_ARG);
-  arg1->as.arg.name = NULL;
-  arg1->as.arg.value = name;
-
-  SleepyASTNode *arg2 = allocate_node(parser, SLEEPY_AST_ARG);
-  arg2->as.arg.name = NULL;
-  arg2->as.arg.value = body;
-
-  node->as.call.args[0] = arg1;
-  node->as.call.args[1] = arg2;
-
-  return node;
 }
 
 static SleepyASTNode *import_statement(SleepyParser *parser) {
@@ -992,12 +972,29 @@ static SleepyASTNode *import_statement(SleepyParser *parser) {
 }
 
 static SleepyASTNode *declaration(SleepyParser *parser) {
-  if (match(parser, SLEEPY_TOKEN_SUB)) {
-    return sub_declaration(parser);
+  if (match(parser, SLEEPY_TOKEN_SUB) || match(parser, SLEEPY_TOKEN_INLINE)) {
+    return bridge(parser, NULL, false);
   }
   if (match(parser, SLEEPY_TOKEN_IMPORT)) {
     return import_statement(parser);
   }
+
+  // Generic Bridge Detection: ID [ID|STRING|LITERAL]? {
+  if (check(parser, SLEEPY_TOKEN_ID)) {
+    const char *saved_current = parser->lexer.current;
+    int saved_line = parser->lexer.line;
+    SleepyToken next = sleepy_lexer_scan_token(&parser->lexer);
+    parser->lexer.current = saved_current;
+    parser->lexer.line = saved_line;
+
+    if (next.type == SLEEPY_TOKEN_ID || next.type == SLEEPY_TOKEN_STRING ||
+        next.type == SLEEPY_TOKEN_LITERAL ||
+        next.type == SLEEPY_TOKEN_LEFT_BRACE) {
+      advance(parser); // Consume the keyword identifier
+      return bridge(parser, NULL, false);
+    }
+  }
+
   return statement(parser);
 }
 

@@ -9,7 +9,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/* --- File: include/sleepy_common.h --- */
+/* --- File: ../include/sleepy_common.h --- */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -43,7 +43,7 @@
   SLEEPY_FREE(allocator, pointer)
 
 
-/* --- File: include/sleepy_core.h --- */
+/* --- File: ../include/sleepy_core.h --- */
 
 
 // A generic allocation function. It should act like `realloc`.
@@ -59,7 +59,7 @@ typedef struct {
 } SleepyAllocator;
 
 
-/* --- File: include/sleepy_utils.h --- */
+/* --- File: ../include/sleepy_utils.h --- */
 
 
 // Reusable dynamic array of bytes/strings (like Wren's StringBuffer)
@@ -84,7 +84,7 @@ size_t sleepy_utils_strlen(const char *s);
 char *sleepy_utils_strcpy(char *dest, const char *src);
 
 
-/* --- File: include/sleepy_lexer.h --- */
+/* --- File: ../include/sleepy_lexer.h --- */
 
 
 typedef enum {
@@ -217,7 +217,7 @@ SleepyToken sleepy_lexer_scan_token(SleepyLexer *lexer);
 const char *sleepy_lexer_copy_lexeme(SleepyLexer *lexer, SleepyToken *token);
 
 
-/* --- File: include/sleepy_parser.h --- */
+/* --- File: ../include/sleepy_parser.h --- */
 
 
 // Forward declaration of an AST node
@@ -423,6 +423,16 @@ void sleepy_parser_init(SleepyParser *parser, const char *source,
 // Given a parser initialized on some source code, parse it.
 // Returns a top-level AST node or NULL if it failed.
 SleepyASTNode *sleepy_parser_parse(SleepyParser *parser);
+
+
+/* --- File: ../include/sleepy_ast.h --- */
+
+
+// Formats a Sleepy AST Node back into Sleepy source code natively.
+// Returns a dynamically allocated string containing the code.
+// The caller is responsible for freeing the resulting string using
+// allocator->reallocate(ptr, 0).
+char *sleepy_ast_format(SleepyASTNode *node, SleepyAllocator *allocator);
 
 
 #endif // SLEEPY_H
