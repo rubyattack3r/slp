@@ -232,7 +232,12 @@ static SleepyTokenType identifier_type(SleepyLexer *lexer) {
     // 'x' by itself can be the repetition operator, but only in certain contexts
     // If it's followed by a number, string, literal, or identifier (but not '=' or '=>'), it's the operator
     if (lexer->current - lexer->start == 1) {
-      char next = peek(lexer);
+      // Look ahead past whitespace to determine if this is the operator
+      const char *lookahead = lexer->current;
+      while (*lookahead == ' ' || *lookahead == '\t' || *lookahead == '\r' || *lookahead == '\n') {
+        lookahead++;
+      }
+      char next = *lookahead;
       // Don't treat as operator if followed by '=' (for '=>' or 'x=')
       if (next != '=' && (is_digit(next) || next == '"' || next == '\'' ||
           next == '_' || is_alpha(next) || next == '$' || next == '@' || next == '%')) {

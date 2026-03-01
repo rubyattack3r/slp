@@ -1025,7 +1025,7 @@ SleepyASTNode **parse_args(SleepyParser *parser, size_t *count,
       // Special case: 'x' (as LOWER_X or ID) followed by '=>' should be treated as an identifier
       // This is used in hash literals like: hash(x => "value")
       if ((check(parser, SLEEPY_TOKEN_LOWER_X) || check(parser, SLEEPY_TOKEN_ID)) &&
-          sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous)[0] == 'x') {
+          parser->current.length == 1 && parser->current.start[0] == 'x') {
         // Check if the next token is =>
         const char *saved_current = parser->lexer.current;
         SleepyToken next_token = sleepy_lexer_scan_token(&parser->lexer);
