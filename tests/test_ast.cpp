@@ -63,6 +63,14 @@ TEST_CASE("AST Serialization: Literals and Basic Expressions") {
     char *res = roundtrip("$a");
     CHECK(strcmp(res, "$a") == 0);
   }
+
+  SUBCASE("Hashtable and Array assignments") {
+    const char *src = "%hash = %();\n@array = @();";
+    char *res = roundtrip(src);
+    CHECK(!!(res != NULL));
+    CHECK(!!(strstr(res, "%hash = %()") != NULL));
+    CHECK(!!(strstr(res, "@array = @()") != NULL));
+  }
 }
 
 TEST_CASE("AST Serialization: Control Flow") {

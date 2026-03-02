@@ -2,6 +2,7 @@
 #include "sleepy_utils.h"
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Forward declarations
 static void advance(SleepyParser *parser);
@@ -72,16 +73,18 @@ void sleepy_parser_init(SleepyParser *parser, const char *source,
   parser->previous.length = 0;
   parser->previous.line = 0;
   parser->current = parser->previous;
+  parser->error_line = 0;
+  parser->error_message = NULL;
 }
 
 static void error_at(SleepyParser *parser, SleepyToken *token,
                      const char *message) {
-  (void)token;
-  (void)message;
   if (parser->panic_mode)
     return;
   parser->panic_mode = true;
   parser->had_error = true;
+  parser->error_line = token->line;
+  parser->error_message = message;
 }
 
 static void error(SleepyParser *parser, const char *message) {
@@ -125,8 +128,11 @@ static bool check(SleepyParser *parser, SleepyTokenType type) {
 static SleepyASTNode *allocate_node(SleepyParser *parser,
                                     SleepyASTNodeType type) {
   SleepyASTNode *node = SLEEPY_ALLOCATE(parser->allocator, SleepyASTNode);
-  node->type = type;
-  node->line = parser->previous.line;
+  if (node) {
+    memset(node, 0, sizeof(SleepyASTNode));
+    node->type = type;
+    node->line = parser->previous.line;
+  }
   return node;
 }
 
@@ -714,6 +720,48 @@ static SleepyASTNode *parse_precedence(SleepyParser *parser,
   }
   bool canAssign = precedence <= PREC_ASSIGNMENT;
   SleepyASTNode *expr = prefix_rule(parser, NULL, canAssign);
+
+  // Special case: string juxtaposition concatenation
+  // If the expression we just parsed is a string literal, and the NEXT token
+  // is ALSO a string literal, we should concatenate them into a single node.
+  if (expr &&
+      (expr->type == SLEEPY_AST_STRING || expr->type == SLEEPY_AST_LITERAL) &&
+      (check(parser, SLEEPY_TOKEN_STRING) ||
+       check(parser, SLEEPY_TOKEN_LITERAL))) {
+
+    SleepyStringBuffer buffer;
+    sleepy_string_buffer_init(&buffer, parser->allocator);
+
+    // Append the first string
+    sleepy_string_buffer_append_string(
+        &buffer, expr->as.string_val, sleepy_utils_strlen(expr->as.string_val));
+
+    // While the next token is a string literal, consume and append it
+    while (check(parser, SLEEPY_TOKEN_STRING) ||
+           check(parser, SLEEPY_TOKEN_LITERAL)) {
+      advance(parser);
+      char *next =
+          (char *)sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
+      sleepy_string_buffer_append_string(&buffer, next,
+                                         sleepy_utils_strlen(next));
+      parser->allocator->reallocate(next, 0, parser->allocator->user_data);
+    }
+
+    // Update the expression to be the concatenated string
+    expr->type = SLEEPY_AST_STRING;
+    // Free the old string value
+    parser->allocator->reallocate((void *)expr->as.string_val, 0,
+                                  parser->allocator->user_data);
+
+    char *new_str = (char *)parser->allocator->reallocate(
+        NULL, buffer.length + 1, parser->allocator->user_data);
+    sleepy_utils_memcpy(new_str, buffer.data, buffer.length);
+    new_str[buffer.length] = '\0';
+    expr->as.string_val = new_str;
+
+    sleepy_string_buffer_free(&buffer);
+  }
+
   while (precedence <= get_rule(parser->current.type)->precedence) {
     advance(parser);
     ParseFn infix_rule = get_rule(parser->previous.type)->infix;
@@ -1033,6 +1081,8 @@ SleepyASTNode **parse_args(SleepyParser *parser, size_t *count,
       NULL, sizeof(SleepyASTNode *) * capacity, parser->allocator->user_data);
   if (!check(parser, endToken)) {
     do {
+      if (check(parser, endToken))
+        break;
       if (*count >= capacity) {
         capacity *= 2;
         args = (SleepyASTNode **)parser->allocator->reallocate(
@@ -1074,7 +1124,9 @@ SleepyASTNode **parse_args(SleepyParser *parser, size_t *count,
       args[(*count)++] = arg_node;
       if (check(parser, endToken))
         break;
-    } while (match(parser, SLEEPY_TOKEN_COMMA) && !check(parser, endToken));
+    } while ((match(parser, SLEEPY_TOKEN_COMMA) ||
+              (!check(parser, endToken) && !check(parser, SLEEPY_TOKEN_EOF))) &&
+             !parser->had_error);
   }
   return args;
 }

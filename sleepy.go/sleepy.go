@@ -73,8 +73,26 @@ type NodeType int
 type Node struct {
 	Type     NodeType
 	Line     int
-	Value    interface{} // Mapped value based on Type
+	Value    interface{} // Mapped value based on Type (e.g. string for operators, or specific structs)
 	Children []*Node     // Child nodes for traversal
+}
+
+type ForeachMetadata struct {
+	Index string
+	Value string
+}
+
+type ForMetadata struct {
+	InitCount int
+	IncCount  int
+}
+
+type ImportMetadata struct {
+	Path string
+}
+
+type TryCatchMetadata struct {
+	CatchVar string
 }
 
 // AST Node Type Constants
@@ -89,6 +107,7 @@ const (
 	AstHashtable    NodeType = C.SLEEPY_AST_HASHTABLE
 	AstIdentifier   NodeType = C.SLEEPY_AST_IDENTIFIER
 	AstBacktick     NodeType = C.SLEEPY_AST_BACKTICK
+	AstAddress      NodeType = C.SLEEPY_AST_ADDRESS
 	AstCall         NodeType = C.SLEEPY_AST_CALL
 	AstBinop        NodeType = C.SLEEPY_AST_BINOP
 	AstAssignment   NodeType = C.SLEEPY_AST_ASSIGNMENT
@@ -101,6 +120,7 @@ const (
 	AstBreak        NodeType = C.SLEEPY_AST_BREAK
 	AstContinue     NodeType = C.SLEEPY_AST_CONTINUE
 	AstYield        NodeType = C.SLEEPY_AST_YIELD
+	AstAssignLoop   NodeType = C.SLEEPY_AST_ASSIGN_LOOP
 	AstIndex        NodeType = C.SLEEPY_AST_INDEX
 	AstObjExpr      NodeType = C.SLEEPY_AST_OBJ_EXPR
 	AstTryCatch     NodeType = C.SLEEPY_AST_TRY_CATCH
@@ -108,15 +128,19 @@ const (
 	AstAssert       NodeType = C.SLEEPY_AST_ASSERT
 	AstEnvBridge    NodeType = C.SLEEPY_AST_ENV_BRIDGE
 	AstImport       NodeType = C.SLEEPY_AST_IMPORT
+	AstLvalueTuple  NodeType = C.SLEEPY_AST_LVALUE_TUPLE
 	AstArg          NodeType = C.SLEEPY_AST_ARG
 	AstKvPair       NodeType = C.SLEEPY_AST_KV_PAIR
 	AstDone         NodeType = C.SLEEPY_AST_DONE
 	AstHalt         NodeType = C.SLEEPY_AST_HALT
+	AstCallcc       NodeType = C.SLEEPY_AST_CALLCC
 	AstLocal        NodeType = C.SLEEPY_AST_LOCAL
 	AstThis         NodeType = C.SLEEPY_AST_THIS
 	AstBlock        NodeType = C.SLEEPY_AST_BLOCK
 	AstScript       NodeType = C.SLEEPY_AST_SCRIPT
 	AstClassLiteral NodeType = C.SLEEPY_AST_CLASS_LITERAL
+	AstNop          NodeType = C.SLEEPY_AST_NOP
+	AstError        NodeType = C.SLEEPY_AST_ERROR
 )
 
 // String implements the fmt.Stringer interface for NodeType
@@ -142,6 +166,8 @@ func (n NodeType) String() string {
 		return "AstIdentifier"
 	case AstBacktick:
 		return "AstBacktick"
+	case AstAddress:
+		return "AstAddress"
 	case AstCall:
 		return "AstCall"
 	case AstBinop:
@@ -166,6 +192,8 @@ func (n NodeType) String() string {
 		return "AstContinue"
 	case AstYield:
 		return "AstYield"
+	case AstAssignLoop:
+		return "AstAssignLoop"
 	case AstIndex:
 		return "AstIndex"
 	case AstObjExpr:
@@ -180,6 +208,8 @@ func (n NodeType) String() string {
 		return "AstEnvBridge"
 	case AstImport:
 		return "AstImport"
+	case AstLvalueTuple:
+		return "AstLvalueTuple"
 	case AstArg:
 		return "AstArg"
 	case AstKvPair:
@@ -188,6 +218,8 @@ func (n NodeType) String() string {
 		return "AstDone"
 	case AstHalt:
 		return "AstHalt"
+	case AstCallcc:
+		return "AstCallcc"
 	case AstLocal:
 		return "AstLocal"
 	case AstThis:
@@ -198,6 +230,10 @@ func (n NodeType) String() string {
 		return "AstScript"
 	case AstClassLiteral:
 		return "AstClassLiteral"
+	case AstNop:
+		return "AstNop"
+	case AstError:
+		return "AstError"
 	default:
 		return fmt.Sprintf("UnknownNodeType(%d)", int(n))
 	}
@@ -214,7 +250,11 @@ func (p *Parser) Parse(source string) (*Node, error) {
 	node := C.sleepy_parser_parse(p.cParser)
 
 	if p.cParser.had_error {
-		return nil, ErrParsingFailed
+		msg := "parsing failed"
+		if p.cParser.error_message != nil {
+			msg = C.GoString(p.cParser.error_message)
+		}
+		return nil, fmt.Errorf("%s at line %d", msg, int(p.cParser.error_line))
 	}
 
 	if node == nil {
@@ -239,6 +279,7 @@ func (n *Node) Format(p *Parser) string {
 
 	// 2. Format it using the C library
 	// The C formatter returns an allocated string that we must free
+	fmt.Printf("DEBUG: Formatting node type %d with %d children\n", n.Type, len(n.Children))
 	cStr := C.sleepy_ast_format(cNode, p.allocator)
 	if cStr == nil {
 		return ""
@@ -287,12 +328,18 @@ func (p *Parser) buildCNode(node *Node) *C.SleepyASTNode {
 		if len(node.Children) == 0 {
 			return nil, 0
 		}
-		cChildren := make([]*C.SleepyASTNode, len(node.Children))
-		for i, child := range node.Children {
-			cChildren[i] = p.buildCNode(child)
+		// Allocate C memory for the children pointers
+		cPtr := C.sleepy_ast_allocate_children(C.size_t(len(node.Children)), p.allocator)
+		if cPtr == nil {
+			return nil, 0
 		}
-		// CGo trick to get pointer to array elements
-		return (**C.SleepyASTNode)(unsafe.Pointer(&cChildren[0])), C.size_t(len(node.Children))
+		cChildren := (**C.SleepyASTNode)(cPtr)
+		childrenSlice := unsafe.Slice(cChildren, len(node.Children))
+
+		for i, child := range node.Children {
+			childrenSlice[i] = p.buildCNode(child)
+		}
+		return cChildren, C.size_t(len(node.Children))
 	}
 
 	// Configure structure based on specific node types
@@ -314,7 +361,23 @@ func (p *Parser) buildCNode(node *Node) *C.SleepyASTNode {
 		if len(node.Children) == 2 {
 			cLeft := p.buildCNode(node.Children[0])
 			cRight := p.buildCNode(node.Children[1])
-			C.sleepy_ast_set_binop(cNode, cLeft, cRight)
+			if op, ok := node.Value.(string); ok {
+				cOp := C.CString(op)
+				defer C.free(unsafe.Pointer(cOp))
+				C.sleepy_ast_set_binop_with_op(cNode, cLeft, cRight, cOp, p.allocator)
+			} else {
+				C.sleepy_ast_set_binop(cNode, cLeft, cRight)
+			}
+		}
+
+	case AstUnaryop:
+		if len(node.Children) == 1 {
+			cOperand := p.buildCNode(node.Children[0])
+			if op, ok := node.Value.(string); ok {
+				cOp := C.CString(op)
+				defer C.free(unsafe.Pointer(cOp))
+				C.sleepy_ast_set_unaryop_with_op(cNode, cOperand, cOp, p.allocator)
+			}
 		}
 
 	case AstIf:
@@ -353,30 +416,168 @@ func (p *Parser) buildCNode(node *Node) *C.SleepyASTNode {
 			C.sleepy_ast_set_assignment(cNode, cTarget, cVal)
 		}
 
+	case AstIndex:
+		if len(node.Children) == 2 {
+			cCont := p.buildCNode(node.Children[0])
+			cElem := p.buildCNode(node.Children[1])
+			C.sleepy_ast_set_index(cNode, cCont, cElem)
+		}
+
+	case AstKvPair:
+		if len(node.Children) == 2 {
+			cName := p.buildCNode(node.Children[0])
+			cVal := p.buildCNode(node.Children[1])
+			C.sleepy_ast_set_kv_pair(cNode, cName, cVal)
+		}
+
+
 	case AstEnvBridge:
-		var cId, cStr *C.char
-		var cChildrenArr **C.SleepyASTNode
-		var cCount C.size_t
+		// Keyword is stored in node.Value
+		if kw, ok := node.Value.(string); ok {
+			cKw := C.CString(kw)
+			defer C.free(unsafe.Pointer(cKw))
+			C.sleepy_ast_set_env_bridge_keyword(cNode, cKw, p.allocator)
+		}
 
-		if len(node.Children) >= 2 && node.Children[0].Type == AstIdentifier && node.Children[1].Type == AstString {
-			// Extract our artificial children back into the original ID strings
-			if val, ok := node.Children[0].Value.(string); ok {
-				cId = C.CString(val)
-				defer C.free(unsafe.Pointer(cId))
+		// Children are: ID (optional), String (optional), Body (optional)
+		for _, child := range node.Children {
+			if child == nil {
+				continue
 			}
-			if val, ok := node.Children[1].Value.(string); ok {
-				cStr = C.CString(val)
-				defer C.free(unsafe.Pointer(cStr))
+			switch child.Type {
+			case AstIdentifier:
+				if val, ok := child.Value.(string); ok {
+					cId := C.CString(val)
+					defer C.free(unsafe.Pointer(cId))
+					C.sleepy_ast_set_env_bridge_id(cNode, cId, p.allocator)
+				}
+			case AstString, AstLiteral:
+				if val, ok := child.Value.(string); ok {
+					cStr := C.CString(val)
+					defer C.free(unsafe.Pointer(cStr))
+					C.sleepy_ast_set_env_bridge_string(cNode, cStr, p.allocator)
+				}
+			case AstBlock:
+				cBody := p.buildCNode(child)
+				C.sleepy_ast_set_env_bridge_body(cNode, cBody)
+			}
+		}
+
+	case AstForeach:
+		if meta, ok := node.Value.(ForeachMetadata); ok {
+			cIdx := C.CString(meta.Index)
+			defer C.free(unsafe.Pointer(cIdx))
+			cVal := C.CString(meta.Value)
+			defer C.free(unsafe.Pointer(cVal))
+
+			var cGen, cBody *C.SleepyASTNode
+			if len(node.Children) > 0 {
+				cGen = p.buildCNode(node.Children[0])
+			}
+			if len(node.Children) > 1 {
+				cBody = p.buildCNode(node.Children[1])
+			}
+			C.sleepy_ast_set_foreach(cNode, cIdx, cVal, cGen, cBody, p.allocator)
+		}
+
+	case AstFor:
+		if meta, ok := node.Value.(ForMetadata); ok {
+			// Children are: init..., cond, inc..., body
+			total := len(node.Children)
+			if total == 0 {
+				break
 			}
 
-			// Any remaining children are actual bridge arguments
-			if len(node.Children) > 2 {
-				origChildren := node.Children
-				node.Children = node.Children[2:]
-				cChildrenArr, cCount = buildChildren()
-				node.Children = origChildren // restore
+			// Extract init
+			var cInit **C.SleepyASTNode
+			if meta.InitCount > 0 {
+				cPtr := C.sleepy_ast_allocate_children(C.size_t(meta.InitCount), p.allocator)
+				cInit = (**C.SleepyASTNode)(cPtr)
+				initSlice := unsafe.Slice(cInit, meta.InitCount)
+				for i := 0; i < meta.InitCount && i < total; i++ {
+					initSlice[i] = p.buildCNode(node.Children[i])
+				}
 			}
-			C.sleepy_ast_set_env_bridge(cNode, cId, cStr, cChildrenArr, cCount, p.allocator)
+
+			// Extract cond
+			var cCond *C.SleepyASTNode
+			condIdx := meta.InitCount
+			if condIdx < total {
+				cCond = p.buildCNode(node.Children[condIdx])
+			}
+
+			// Extract inc
+			var cInc **C.SleepyASTNode
+			incStart := condIdx + 1
+			if meta.IncCount > 0 {
+				cPtr := C.sleepy_ast_allocate_children(C.size_t(meta.IncCount), p.allocator)
+				cInc = (**C.SleepyASTNode)(cPtr)
+				incSlice := unsafe.Slice(cInc, meta.IncCount)
+				for i := 0; i < meta.IncCount && (incStart+i) < total; i++ {
+					incSlice[i] = p.buildCNode(node.Children[incStart+i])
+				}
+			}
+
+			// Extract body
+			var cBody *C.SleepyASTNode
+			bodyIdx := incStart + meta.IncCount
+			if bodyIdx < total {
+				cBody = p.buildCNode(node.Children[bodyIdx])
+			}
+
+			C.sleepy_ast_set_for(cNode, cInit, C.size_t(meta.InitCount), cCond, cInc, C.size_t(meta.IncCount), cBody, p.allocator)
+		}
+
+	case AstReturn, AstThrow, AstAssert, AstYield:
+		if len(node.Children) > 0 {
+			cVal := p.buildCNode(node.Children[0])
+			switch node.Type {
+			case AstReturn:
+				C.sleepy_ast_set_return(cNode, cVal)
+			case AstThrow:
+				C.sleepy_ast_set_throw(cNode, cVal)
+			case AstAssert:
+				C.sleepy_ast_set_assert(cNode, cVal)
+			case AstYield:
+				C.sleepy_ast_set_yield(cNode, cVal)
+			}
+		}
+
+	case AstBreak:
+		C.sleepy_ast_set_break(cNode)
+	case AstContinue:
+		C.sleepy_ast_set_continue(cNode)
+
+	case AstTryCatch:
+		if meta, ok := node.Value.(TryCatchMetadata); ok {
+			var cBody, cHandler *C.SleepyASTNode
+			if len(node.Children) > 0 {
+				cBody = p.buildCNode(node.Children[0])
+			}
+			if len(node.Children) > 1 {
+				cHandler = p.buildCNode(node.Children[1])
+			}
+			cVar := C.CString(meta.CatchVar)
+			defer C.free(unsafe.Pointer(cVar))
+			C.sleepy_ast_set_try_catch(cNode, cBody, cVar, cHandler, p.allocator)
+		}
+
+	case AstImport:
+		if meta, ok := node.Value.(ImportMetadata); ok {
+			cPath := C.CString(meta.Path)
+			defer C.free(unsafe.Pointer(cPath))
+			C.sleepy_ast_set_import(cNode, cPath, p.allocator)
+		}
+
+	case AstBacktick, AstAddress:
+		if val, ok := node.Value.(string); ok {
+			cStr := C.CString(val)
+			defer C.free(unsafe.Pointer(cStr))
+			if node.Type == AstBacktick {
+				C.sleepy_ast_set_backtick(cNode, cStr, p.allocator)
+			} else {
+				C.sleepy_ast_set_string_val(cNode, cStr, p.allocator)
+			}
 		}
 	}
 
@@ -423,7 +624,7 @@ func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
 		node.Value = float64(C.sleepy_ast_get_double(cNode))
 	case C.SLEEPY_AST_STRING, C.SLEEPY_AST_LITERAL, C.SLEEPY_AST_SCALAR,
 		C.SLEEPY_AST_ARRAY, C.SLEEPY_AST_HASHTABLE, C.SLEEPY_AST_IDENTIFIER,
-		C.SLEEPY_AST_CLASS_LITERAL:
+		C.SLEEPY_AST_CLASS_LITERAL, C.SLEEPY_AST_BACKTICK, C.SLEEPY_AST_ADDRESS:
 		val := C.sleepy_ast_get_string(cNode)
 		if val != nil {
 			node.Value = C.GoString(val)
@@ -447,6 +648,42 @@ func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
 				Type:  AstString,
 				Value: C.GoString(str_ptr),
 			}}, node.Children...)
+		}
+	case C.SLEEPY_AST_FOREACH:
+		meta := ForeachMetadata{}
+		idx := C.sleepy_ast_get_foreach_index(cNode)
+		if idx != nil {
+			meta.Index = C.GoString(idx)
+		}
+		val := C.sleepy_ast_get_foreach_value(cNode)
+		if val != nil {
+			meta.Value = C.GoString(val)
+		}
+		node.Value = meta
+	case C.SLEEPY_AST_FOR:
+		meta := ForMetadata{
+			InitCount: int(C.sleepy_ast_get_for_init_count(cNode)),
+			IncCount:  int(C.sleepy_ast_get_for_inc_count(cNode)),
+		}
+		node.Value = meta
+	case C.SLEEPY_AST_IMPORT:
+		path := C.sleepy_ast_get_import_path(cNode)
+		if path != nil {
+			node.Value = ImportMetadata{Path: C.GoString(path)}
+		}
+	case C.SLEEPY_AST_TRY_CATCH:
+		v := C.sleepy_ast_get_try_catch_var(cNode)
+		if v != nil {
+			node.Value = TryCatchMetadata{CatchVar: C.GoString(v)}
+		}
+	}
+
+	// Extract operator for binop/unaryop/assignment
+	if cType == C.SLEEPY_AST_BINOP || cType == C.SLEEPY_AST_UNARYOP || cType == C.SLEEPY_AST_ASSIGNMENT {
+		op := C.sleepy_ast_get_op(cNode)
+		if op != nil {
+			opLen := C.sleepy_ast_get_op_length(cNode)
+			node.Value = C.GoStringN(op, C.int(opLen))
 		}
 	}
 

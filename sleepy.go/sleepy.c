@@ -24,21 +24,29 @@ void sleepy_string_buffer_free(SleepyStringBuffer *buffer) {
 }
 
 void sleepy_string_buffer_append_char(SleepyStringBuffer *buffer, char c) {
-  if (buffer->capacity < buffer->length + 1) {
-    size_t new_capacity = buffer->capacity == 0 ? 8 : buffer->capacity * 2;
+  // We need space for the char PLUS the null terminator
+  if (buffer->capacity < buffer->length + 2) {
+    size_t new_capacity = buffer->capacity == 0 ? 16 : buffer->capacity * 2;
+    while (new_capacity < buffer->length + 2) {
+      new_capacity *= 2;
+    }
     buffer->data =
         (char *)SLEEPY_REALLOC(buffer->allocator, buffer->data, new_capacity);
     buffer->capacity = new_capacity;
   }
 
   buffer->data[buffer->length++] = c;
+  buffer->data[buffer->length] = '\0';
 }
 
 void sleepy_string_buffer_append_string(SleepyStringBuffer *buffer,
                                         const char *str, size_t length) {
-  if (buffer->capacity < buffer->length + length) {
-    size_t new_capacity = buffer->capacity == 0 ? 8 : buffer->capacity * 2;
-    while (new_capacity < buffer->length + length) {
+  if (length == 0)
+    return;
+  // We need space for the string PLUS the null terminator
+  if (buffer->capacity < buffer->length + length + 1) {
+    size_t new_capacity = buffer->capacity == 0 ? 16 : buffer->capacity * 2;
+    while (new_capacity < buffer->length + length + 1) {
       new_capacity *= 2;
     }
     buffer->data =
@@ -50,6 +58,7 @@ void sleepy_string_buffer_append_string(SleepyStringBuffer *buffer,
     buffer->data[buffer->length + i] = str[i];
   }
   buffer->length += length;
+  buffer->data[buffer->length] = '\0';
 }
 
 void *sleepy_utils_memcpy(void *dest, const void *src, size_t n) {
@@ -634,6 +643,7 @@ const char *sleepy_lexer_copy_lexeme(SleepyLexer *lexer, SleepyToken *token) {
 /* --- File: ../src/sleepy_parser.c --- */
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Forward declarations
 static void advance(SleepyParser *parser);
@@ -704,16 +714,18 @@ void sleepy_parser_init(SleepyParser *parser, const char *source,
   parser->previous.length = 0;
   parser->previous.line = 0;
   parser->current = parser->previous;
+  parser->error_line = 0;
+  parser->error_message = NULL;
 }
 
 static void error_at(SleepyParser *parser, SleepyToken *token,
                      const char *message) {
-  (void)token;
-  (void)message;
   if (parser->panic_mode)
     return;
   parser->panic_mode = true;
   parser->had_error = true;
+  parser->error_line = token->line;
+  parser->error_message = message;
 }
 
 static void error(SleepyParser *parser, const char *message) {
@@ -757,8 +769,11 @@ static bool check(SleepyParser *parser, SleepyTokenType type) {
 static SleepyASTNode *allocate_node(SleepyParser *parser,
                                     SleepyASTNodeType type) {
   SleepyASTNode *node = SLEEPY_ALLOCATE(parser->allocator, SleepyASTNode);
-  node->type = type;
-  node->line = parser->previous.line;
+  if (node) {
+    memset(node, 0, sizeof(SleepyASTNode));
+    node->type = type;
+    node->line = parser->previous.line;
+  }
   return node;
 }
 
@@ -1346,6 +1361,48 @@ static SleepyASTNode *parse_precedence(SleepyParser *parser,
   }
   bool canAssign = precedence <= PREC_ASSIGNMENT;
   SleepyASTNode *expr = prefix_rule(parser, NULL, canAssign);
+
+  // Special case: string juxtaposition concatenation
+  // If the expression we just parsed is a string literal, and the NEXT token
+  // is ALSO a string literal, we should concatenate them into a single node.
+  if (expr &&
+      (expr->type == SLEEPY_AST_STRING || expr->type == SLEEPY_AST_LITERAL) &&
+      (check(parser, SLEEPY_TOKEN_STRING) ||
+       check(parser, SLEEPY_TOKEN_LITERAL))) {
+
+    SleepyStringBuffer buffer;
+    sleepy_string_buffer_init(&buffer, parser->allocator);
+
+    // Append the first string
+    sleepy_string_buffer_append_string(
+        &buffer, expr->as.string_val, sleepy_utils_strlen(expr->as.string_val));
+
+    // While the next token is a string literal, consume and append it
+    while (check(parser, SLEEPY_TOKEN_STRING) ||
+           check(parser, SLEEPY_TOKEN_LITERAL)) {
+      advance(parser);
+      char *next =
+          (char *)sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
+      sleepy_string_buffer_append_string(&buffer, next,
+                                         sleepy_utils_strlen(next));
+      parser->allocator->reallocate(next, 0, parser->allocator->user_data);
+    }
+
+    // Update the expression to be the concatenated string
+    expr->type = SLEEPY_AST_STRING;
+    // Free the old string value
+    parser->allocator->reallocate((void *)expr->as.string_val, 0,
+                                  parser->allocator->user_data);
+
+    char *new_str = (char *)parser->allocator->reallocate(
+        NULL, buffer.length + 1, parser->allocator->user_data);
+    sleepy_utils_memcpy(new_str, buffer.data, buffer.length);
+    new_str[buffer.length] = '\0';
+    expr->as.string_val = new_str;
+
+    sleepy_string_buffer_free(&buffer);
+  }
+
   while (precedence <= get_rule(parser->current.type)->precedence) {
     advance(parser);
     ParseFn infix_rule = get_rule(parser->previous.type)->infix;
@@ -1665,6 +1722,8 @@ SleepyASTNode **parse_args(SleepyParser *parser, size_t *count,
       NULL, sizeof(SleepyASTNode *) * capacity, parser->allocator->user_data);
   if (!check(parser, endToken)) {
     do {
+      if (check(parser, endToken))
+        break;
       if (*count >= capacity) {
         capacity *= 2;
         args = (SleepyASTNode **)parser->allocator->reallocate(
@@ -1706,7 +1765,9 @@ SleepyASTNode **parse_args(SleepyParser *parser, size_t *count,
       args[(*count)++] = arg_node;
       if (check(parser, endToken))
         break;
-    } while (match(parser, SLEEPY_TOKEN_COMMA) && !check(parser, endToken));
+    } while ((match(parser, SLEEPY_TOKEN_COMMA) ||
+              (!check(parser, endToken) && !check(parser, SLEEPY_TOKEN_EOF))) &&
+             !parser->had_error);
   }
   return args;
 }
@@ -1748,6 +1809,41 @@ SleepyASTNode *sleepy_parser_parse(SleepyParser *parser) {
 static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
                         int depth);
 
+// Helper for operator token types
+static SleepyTokenType get_token_type_from_op(const char *op) {
+  if (!op)
+    return SLEEPY_TOKEN_ERROR;
+  if (strcmp(op, "+") == 0)
+    return SLEEPY_TOKEN_PLUS;
+  if (strcmp(op, "-") == 0)
+    return SLEEPY_TOKEN_MINUS;
+  if (strcmp(op, "*") == 0)
+    return SLEEPY_TOKEN_STAR;
+  if (strcmp(op, "/") == 0)
+    return SLEEPY_TOKEN_SLASH;
+  if (strcmp(op, "%") == 0)
+    return SLEEPY_TOKEN_PERCENT;
+  if (strcmp(op, "==") == 0)
+    return SLEEPY_TOKEN_EQ;
+  if (strcmp(op, "!=") == 0)
+    return SLEEPY_TOKEN_NE;
+  if (strcmp(op, "<") == 0)
+    return SLEEPY_TOKEN_LESS;
+  if (strcmp(op, "<=") == 0)
+    return SLEEPY_TOKEN_LE;
+  if (strcmp(op, ">") == 0)
+    return SLEEPY_TOKEN_GREATER;
+  if (strcmp(op, ">=") == 0)
+    return SLEEPY_TOKEN_GE;
+  if (strcmp(op, "&&") == 0)
+    return SLEEPY_TOKEN_LAND;
+  if (strcmp(op, "||") == 0)
+    return SLEEPY_TOKEN_LOR;
+  if (strcmp(op, "=") == 0)
+    return SLEEPY_TOKEN_EQUAL;
+  return SLEEPY_TOKEN_ERROR;
+}
+
 char *sleepy_ast_format(SleepyASTNode *node, SleepyAllocator *allocator) {
   if (!node || !allocator)
     return NULL;
@@ -1757,7 +1853,6 @@ char *sleepy_ast_format(SleepyASTNode *node, SleepyAllocator *allocator) {
 
   format_node(node, &buffer, 0);
 
-  // Return the formatted string; caller assumes ownership.
   return buffer.data;
 }
 
@@ -1767,7 +1862,7 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
                              size_t *out_count, SleepyAllocator *allocator) {
   *out_children = NULL;
   *out_count = 0;
-  if (!node)
+  if (!node || !allocator)
     return;
 
   switch (node->type) {
@@ -1775,7 +1870,7 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
   case SLEEPY_AST_BLOCK: {
     if (node->as.block.count == 0)
       break;
-    SleepyASTNode **children = allocator->reallocate(
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
         NULL, node->as.block.count * sizeof(SleepyASTNode *),
         allocator->user_data);
     for (size_t i = 0; i < node->as.block.count; i++) {
@@ -1788,7 +1883,7 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
   case SLEEPY_AST_CALL: {
     if (node->as.call.arg_count == 0)
       break;
-    SleepyASTNode **children = allocator->reallocate(
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
         NULL, node->as.call.arg_count * sizeof(SleepyASTNode *),
         allocator->user_data);
     for (size_t i = 0; i < node->as.call.arg_count; i++) {
@@ -1799,7 +1894,7 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
     break;
   }
   case SLEEPY_AST_BINOP: {
-    SleepyASTNode **children = allocator->reallocate(
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
         NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
     children[0] = node->as.binop.left;
     children[1] = node->as.binop.right;
@@ -1808,7 +1903,7 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
     break;
   }
   case SLEEPY_AST_ASSIGNMENT: {
-    SleepyASTNode **children = allocator->reallocate(
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
         NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
     children[0] = node->as.assign.left;
     children[1] = node->as.assign.right;
@@ -1816,17 +1911,25 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
     *out_count = 2;
     break;
   }
-  case SLEEPY_AST_ARG: {
-    SleepyASTNode **children = allocator->reallocate(
-        NULL, 1 * sizeof(SleepyASTNode *), allocator->user_data);
-    children[0] = node->as.arg.value;
+  case SLEEPY_AST_ARG:
+  case SLEEPY_AST_KV_PAIR: {
+    size_t cnt =
+        (node->type == SLEEPY_AST_KV_PAIR && node->as.arg.name) ? 2 : 1;
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
+        NULL, cnt * sizeof(SleepyASTNode *), allocator->user_data);
+    if (cnt == 2) {
+      children[0] = node->as.arg.name;
+      children[1] = node->as.arg.value;
+    } else {
+      children[0] = node->as.arg.value;
+    }
     *out_children = children;
-    *out_count = 1;
+    *out_count = cnt;
     break;
   }
   case SLEEPY_AST_ENV_BRIDGE: {
     if (node->as.env_bridge.body) {
-      SleepyASTNode **children = allocator->reallocate(
+      SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
           NULL, 1 * sizeof(SleepyASTNode *), allocator->user_data);
       children[0] = node->as.env_bridge.body;
       *out_children = children;
@@ -1835,7 +1938,7 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
     break;
   }
   case SLEEPY_AST_IF: {
-    SleepyASTNode **children = allocator->reallocate(
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
         NULL, 3 * sizeof(SleepyASTNode *), allocator->user_data);
     size_t count = 0;
     if (node->as.if_stmt.condition)
@@ -1853,7 +1956,7 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
     break;
   }
   case SLEEPY_AST_WHILE: {
-    SleepyASTNode **children = allocator->reallocate(
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
         NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
     size_t count = 0;
     if (node->as.while_stmt.condition)
@@ -1871,27 +1974,19 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
   case SLEEPY_AST_FOR: {
     size_t total_count =
         node->as.for_stmt.init_count + 1 + node->as.for_stmt.inc_count + 1;
-    if (total_count == 0)
-      break;
-
-    // Use the allocator to allocate a temporary array of children
-    SleepyASTNode **children = allocator->reallocate(
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
         NULL, total_count * sizeof(SleepyASTNode *), allocator->user_data);
     size_t count = 0;
-
     for (size_t i = 0; i < node->as.for_stmt.init_count; i++) {
       children[count++] = node->as.for_stmt.initializer[i];
     }
-    if (node->as.for_stmt.condition) {
+    if (node->as.for_stmt.condition)
       children[count++] = node->as.for_stmt.condition;
-    }
     for (size_t i = 0; i < node->as.for_stmt.inc_count; i++) {
       children[count++] = node->as.for_stmt.increment[i];
     }
-    if (node->as.for_stmt.body) {
+    if (node->as.for_stmt.body)
       children[count++] = node->as.for_stmt.body;
-    }
-
     if (count > 0) {
       *out_children = children;
       *out_count = count;
@@ -1900,84 +1995,22 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
     }
     break;
   }
-  case SLEEPY_AST_FOREACH: {
-    SleepyASTNode **children = allocator->reallocate(
-        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
-    size_t count = 0;
-    if (node->as.foreach.generator)
-      children[count++] = node->as.foreach.generator;
-    if (node->as.foreach.body)
-      children[count++] = node->as.foreach.body;
-    if (count > 0) {
-      *out_children = children;
-      *out_count = count;
-    } else {
-      allocator->reallocate(children, 0, allocator->user_data);
-    }
-    break;
-  }
+  case SLEEPY_AST_FOREACH:
   case SLEEPY_AST_ASSIGN_LOOP: {
-    SleepyASTNode **children = allocator->reallocate(
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
         NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
     size_t count = 0;
-    if (node->as.assign_loop.generator)
-      children[count++] = node->as.assign_loop.generator;
-    if (node->as.assign_loop.body)
-      children[count++] = node->as.assign_loop.body;
-    if (count > 0) {
-      *out_children = children;
-      *out_count = count;
+    if (node->type == SLEEPY_AST_FOREACH) {
+      if (node->as.foreach.generator)
+        children[count++] = node->as.foreach.generator;
+      if (node->as.foreach.body)
+        children[count++] = node->as.foreach.body;
     } else {
-      allocator->reallocate(children, 0, allocator->user_data);
+      if (node->as.assign_loop.generator)
+        children[count++] = node->as.assign_loop.generator;
+      if (node->as.assign_loop.body)
+        children[count++] = node->as.assign_loop.body;
     }
-    break;
-  }
-  case SLEEPY_AST_INDEX: {
-    SleepyASTNode **children = allocator->reallocate(
-        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
-    size_t count = 0;
-    if (node->as.index.container)
-      children[count++] = node->as.index.container;
-    if (node->as.index.element)
-      children[count++] = node->as.index.element;
-    if (count > 0) {
-      *out_children = children;
-      *out_count = count;
-    } else {
-      allocator->reallocate(children, 0, allocator->user_data);
-    }
-    break;
-  }
-  case SLEEPY_AST_OBJ_EXPR: {
-    size_t total_count = 2 + node->as.obj_expr.arg_count;
-    SleepyASTNode **children = allocator->reallocate(
-        NULL, total_count * sizeof(SleepyASTNode *), allocator->user_data);
-    size_t count = 0;
-
-    if (node->as.obj_expr.target)
-      children[count++] = node->as.obj_expr.target;
-    if (node->as.obj_expr.message)
-      children[count++] = node->as.obj_expr.message;
-    for (size_t i = 0; i < node->as.obj_expr.arg_count; i++) {
-      children[count++] = node->as.obj_expr.args[i];
-    }
-
-    if (count > 0) {
-      *out_children = children;
-      *out_count = count;
-    } else {
-      allocator->reallocate(children, 0, allocator->user_data);
-    }
-    break;
-  }
-  case SLEEPY_AST_TRY_CATCH: {
-    SleepyASTNode **children = allocator->reallocate(
-        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
-    size_t count = 0;
-    if (node->as.try_catch.body)
-      children[count++] = node->as.try_catch.body;
-    if (node->as.try_catch.handler)
-      children[count++] = node->as.try_catch.handler;
     if (count > 0) {
       *out_children = children;
       *out_count = count;
@@ -1987,11 +2020,13 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
     break;
   }
   case SLEEPY_AST_RETURN:
-  case SLEEPY_AST_YIELD:
   case SLEEPY_AST_THROW:
-  case SLEEPY_AST_ASSERT: {
+  case SLEEPY_AST_ASSERT:
+  case SLEEPY_AST_YIELD:
+  case SLEEPY_AST_LOCAL:
+  case SLEEPY_AST_THIS: {
     if (node->as.control.value) {
-      SleepyASTNode **children = allocator->reallocate(
+      SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
           NULL, 1 * sizeof(SleepyASTNode *), allocator->user_data);
       children[0] = node->as.control.value;
       *out_children = children;
@@ -2000,13 +2035,51 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
     break;
   }
   case SLEEPY_AST_UNARYOP: {
-    if (node->as.unaryop.operand) {
-      SleepyASTNode **children = allocator->reallocate(
-          NULL, 1 * sizeof(SleepyASTNode *), allocator->user_data);
-      children[0] = node->as.unaryop.operand;
-      *out_children = children;
-      *out_count = 1;
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
+        NULL, 1 * sizeof(SleepyASTNode *), allocator->user_data);
+    children[0] = node->as.unaryop.operand;
+    *out_children = children;
+    *out_count = 1;
+    break;
+  }
+  case SLEEPY_AST_INDEX: {
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
+        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
+    size_t count = 0;
+    if (node->as.index.container)
+      children[count++] = node->as.index.container;
+    if (node->as.index.element)
+      children[count++] = node->as.index.element;
+    *out_children = children;
+    *out_count = count;
+    break;
+  }
+  case SLEEPY_AST_OBJ_EXPR: {
+    size_t total = 2 + node->as.obj_expr.arg_count;
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
+        NULL, total * sizeof(SleepyASTNode *), allocator->user_data);
+    size_t count = 0;
+    if (node->as.obj_expr.target)
+      children[count++] = node->as.obj_expr.target;
+    if (node->as.obj_expr.message)
+      children[count++] = node->as.obj_expr.message;
+    for (size_t i = 0; i < node->as.obj_expr.arg_count; i++) {
+      children[count++] = node->as.obj_expr.args[i];
     }
+    *out_children = children;
+    *out_count = count;
+    break;
+  }
+  case SLEEPY_AST_TRY_CATCH: {
+    SleepyASTNode **children = (SleepyASTNode **)allocator->reallocate(
+        NULL, 2 * sizeof(SleepyASTNode *), allocator->user_data);
+    size_t count = 0;
+    if (node->as.try_catch.body)
+      children[count++] = node->as.try_catch.body;
+    if (node->as.try_catch.handler)
+      children[count++] = node->as.try_catch.handler;
+    *out_children = children;
+    *out_count = count;
     break;
   }
   default:
@@ -2016,7 +2089,7 @@ void sleepy_ast_get_children(SleepyASTNode *node, SleepyASTNode ***out_children,
 
 void sleepy_ast_free_children(SleepyASTNode **children,
                               SleepyAllocator *allocator) {
-  if (allocator && allocator->reallocate && children) {
+  if (children && allocator) {
     allocator->reallocate(children, 0, allocator->user_data);
   }
 }
@@ -2032,12 +2105,16 @@ const char *sleepy_ast_get_string(SleepyASTNode *node) {
   case SLEEPY_AST_HASHTABLE:
   case SLEEPY_AST_IDENTIFIER:
   case SLEEPY_AST_CLASS_LITERAL:
+  case SLEEPY_AST_BACKTICK:
+  case SLEEPY_AST_ADDRESS:
     return node->as.string_val;
   case SLEEPY_AST_ENV_BRIDGE:
     return node->as.env_bridge.keyword;
   case SLEEPY_AST_CALL:
     if (node->as.call.target &&
-        node->as.call.target->type == SLEEPY_AST_IDENTIFIER) {
+        (node->as.call.target->type == SLEEPY_AST_IDENTIFIER ||
+         node->as.call.target->type == SLEEPY_AST_HASHTABLE ||
+         node->as.call.target->type == SLEEPY_AST_ARRAY)) {
       return node->as.call.target->as.string_val;
     }
     return NULL;
@@ -2046,34 +2123,592 @@ const char *sleepy_ast_get_string(SleepyASTNode *node) {
   }
 }
 
+const char *sleepy_ast_get_op(SleepyASTNode *node) {
+  if (!node)
+    return NULL;
+  switch (node->type) {
+  case SLEEPY_AST_BINOP:
+    return node->as.binop.op.start;
+  case SLEEPY_AST_UNARYOP:
+    return node->as.unaryop.op.start;
+  case SLEEPY_AST_ASSIGNMENT:
+    return node->as.assign.op.start;
+  default:
+    return NULL;
+  }
+}
+
+size_t sleepy_ast_get_op_length(SleepyASTNode *node) {
+  if (!node)
+    return 0;
+  switch (node->type) {
+  case SLEEPY_AST_BINOP:
+    return node->as.binop.op.length;
+  case SLEEPY_AST_UNARYOP:
+    return node->as.unaryop.op.length;
+  case SLEEPY_AST_ASSIGNMENT:
+    return node->as.assign.op.length;
+  default:
+    return 0;
+  }
+}
+
 long sleepy_ast_get_long(SleepyASTNode *node) {
-  if (node && node->type == SLEEPY_AST_LONG)
-    return node->as.long_val;
-  return 0;
+  return (node && node->type == SLEEPY_AST_LONG) ? node->as.long_val : 0;
 }
 
 double sleepy_ast_get_double(SleepyASTNode *node) {
-  if (node && node->type == SLEEPY_AST_NUMBER)
-    return node->as.double_val;
-  return 0.0;
+  return (node && node->type == SLEEPY_AST_NUMBER) ? node->as.double_val : 0.0;
 }
 
 bool sleepy_ast_get_bool(SleepyASTNode *node) {
-  if (node && node->type == SLEEPY_AST_BOOLEAN)
-    return node->as.boolean;
-  return false;
+  return (node && node->type == SLEEPY_AST_BOOLEAN) ? node->as.boolean : false;
 }
 
 const char *sleepy_ast_get_env_bridge_id(SleepyASTNode *node) {
-  if (node && node->type == SLEEPY_AST_ENV_BRIDGE)
-    return node->as.env_bridge.identifier;
-  return NULL;
+  return (node && node->type == SLEEPY_AST_ENV_BRIDGE)
+             ? node->as.env_bridge.identifier
+             : NULL;
 }
 
 const char *sleepy_ast_get_env_bridge_string(SleepyASTNode *node) {
+  return (node && node->type == SLEEPY_AST_ENV_BRIDGE)
+             ? node->as.env_bridge.string
+             : NULL;
+}
+
+const char *sleepy_ast_get_foreach_index(SleepyASTNode *node) {
+  return (node && node->type == SLEEPY_AST_FOREACH) ? node->as.foreach.index
+                                                    : NULL;
+}
+
+const char *sleepy_ast_get_foreach_value(SleepyASTNode *node) {
+  return (node && node->type == SLEEPY_AST_FOREACH) ? node->as.foreach.value
+                                                    : NULL;
+}
+
+const char *sleepy_ast_get_import_path(SleepyASTNode *node) {
+  return (node && node->type == SLEEPY_AST_IMPORT) ? node->as.import_stmt.path
+                                                   : NULL;
+}
+
+const char *sleepy_ast_get_try_catch_var(SleepyASTNode *node) {
+  return (node && node->type == SLEEPY_AST_TRY_CATCH) ? node->as.try_catch.value
+                                                      : NULL;
+}
+
+size_t sleepy_ast_get_for_init_count(SleepyASTNode *node) {
+  return (node && node->type == SLEEPY_AST_FOR) ? node->as.for_stmt.init_count
+                                                : 0;
+}
+
+size_t sleepy_ast_get_for_inc_count(SleepyASTNode *node) {
+  return (node && node->type == SLEEPY_AST_FOR) ? node->as.for_stmt.inc_count
+                                                : 0;
+}
+
+// --- AST Builder APIs for FFI ---
+
+SleepyASTNode *sleepy_ast_build_node(SleepyASTNodeType type, int line,
+                                     SleepyAllocator *allocator) {
+  SleepyASTNode *node =
+      (SleepyASTNode *)allocator->reallocate(NULL, sizeof(SleepyASTNode), NULL);
+  if (!node)
+    return NULL;
+  memset(node, 0, sizeof(SleepyASTNode));
+  node->type = type;
+  node->line = line;
+  return node;
+}
+
+void sleepy_ast_set_string_val(SleepyASTNode *node, const char *str,
+                               SleepyAllocator *allocator) {
+  if (!node || !str || !allocator)
+    return;
+  size_t len = strlen(str);
+  char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
+  if (dup) {
+    strcpy(dup, str);
+    switch (node->type) {
+    case SLEEPY_AST_STRING:
+    case SLEEPY_AST_LITERAL:
+    case SLEEPY_AST_SCALAR:
+    case SLEEPY_AST_ARRAY:
+    case SLEEPY_AST_HASHTABLE:
+    case SLEEPY_AST_IDENTIFIER:
+    case SLEEPY_AST_CLASS_LITERAL:
+    case SLEEPY_AST_BACKTICK:
+    case SLEEPY_AST_ADDRESS:
+      node->as.string_val = dup;
+      break;
+    default:
+      allocator->reallocate(dup, 0, NULL);
+      break;
+    }
+  }
+}
+
+void sleepy_ast_set_long_val(SleepyASTNode *node, long val) {
+  if (node && node->type == SLEEPY_AST_LONG)
+    node->as.long_val = val;
+}
+
+void sleepy_ast_set_double_val(SleepyASTNode *node, double val) {
+  if (node && node->type == SLEEPY_AST_NUMBER)
+    node->as.double_val = val;
+}
+
+void sleepy_ast_set_bool_val(SleepyASTNode *node, bool val) {
+  if (node && node->type == SLEEPY_AST_BOOLEAN)
+    node->as.boolean = val;
+}
+
+SleepyASTNode **sleepy_ast_allocate_children(size_t count,
+                                             SleepyAllocator *allocator) {
+  if (count == 0)
+    return NULL;
+  return (SleepyASTNode **)allocator->reallocate(
+      NULL, count * sizeof(SleepyASTNode *), NULL);
+}
+
+void sleepy_ast_set_children(SleepyASTNode *node, SleepyASTNode **children,
+                             size_t count, SleepyAllocator *allocator) {
+  if (!node)
+    return;
+  SleepyASTNode **arr = NULL;
+  if (count > 0 && children) {
+    arr = (SleepyASTNode **)allocator->reallocate(
+        NULL, count * sizeof(SleepyASTNode *), NULL);
+    for (size_t i = 0; i < count; i++)
+      arr[i] = children[i];
+  }
+  switch (node->type) {
+  case SLEEPY_AST_SCRIPT:
+  case SLEEPY_AST_BLOCK:
+    node->as.block.statements = arr;
+    node->as.block.count = count;
+    node->as.block.capacity = count;
+    break;
+  case SLEEPY_AST_CALL:
+    node->as.call.args = arr;
+    node->as.call.arg_count = count;
+    break;
+  default:
+    if (arr)
+      allocator->reallocate(arr, 0, NULL);
+    break;
+  }
+}
+
+void sleepy_ast_set_binop(SleepyASTNode *node, SleepyASTNode *left,
+                          SleepyASTNode *right) {
+  if (node && node->type == SLEEPY_AST_BINOP) {
+    node->as.binop.left = left;
+    node->as.binop.right = right;
+  }
+}
+
+void sleepy_ast_set_binop_with_op(SleepyASTNode *node, SleepyASTNode *left,
+                                  SleepyASTNode *right, const char *op,
+                                  SleepyAllocator *allocator) {
+  if (node && node->type == SLEEPY_AST_BINOP && allocator) {
+    node->as.binop.left = left;
+    node->as.binop.right = right;
+    node->as.binop.op.type = get_token_type_from_op(op);
+    size_t len = strlen(op);
+    char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
+    if (dup) {
+      strcpy(dup, op);
+      node->as.binop.op.start = dup;
+      node->as.binop.op.length = len;
+    }
+  }
+}
+
+void sleepy_ast_set_unaryop_with_op(SleepyASTNode *node, SleepyASTNode *operand,
+                                    const char *op,
+                                    SleepyAllocator *allocator) {
+  if (node && node->type == SLEEPY_AST_UNARYOP && allocator) {
+    node->as.unaryop.operand = operand;
+    node->as.unaryop.op.type = get_token_type_from_op(op);
+    size_t len = strlen(op);
+    char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
+    if (dup) {
+      strcpy(dup, op);
+      node->as.unaryop.op.start = dup;
+      node->as.unaryop.op.length = len;
+    }
+  }
+}
+
+void sleepy_ast_set_if(SleepyASTNode *node, SleepyASTNode *condition,
+                       SleepyASTNode *then_branch, SleepyASTNode *else_branch) {
+  if (node && node->type == SLEEPY_AST_IF) {
+    node->as.if_stmt.condition = condition;
+    node->as.if_stmt.then_branch = then_branch;
+    node->as.if_stmt.else_branch = else_branch;
+  }
+}
+
+void sleepy_ast_set_while(SleepyASTNode *node, SleepyASTNode *condition,
+                          SleepyASTNode *body) {
+  if (node && node->type == SLEEPY_AST_WHILE) {
+    node->as.while_stmt.condition = condition;
+    node->as.while_stmt.body = body;
+  }
+}
+
+void sleepy_ast_set_arg(SleepyASTNode *node, SleepyASTNode *value) {
+  if (node && node->type == SLEEPY_AST_ARG)
+    node->as.arg.value = value;
+}
+
+void sleepy_ast_set_assignment(SleepyASTNode *node, SleepyASTNode *target,
+                               SleepyASTNode *value) {
+  if (node && node->type == SLEEPY_AST_ASSIGNMENT) {
+    node->as.assign.left = target;
+    node->as.assign.right = value;
+    node->as.assign.op.type = SLEEPY_TOKEN_EQUAL;
+    node->as.assign.op.start = "=";
+    node->as.assign.op.length = 1;
+  }
+}
+
+void sleepy_ast_set_env_bridge_keyword(SleepyASTNode *node, const char *keyword,
+                                       SleepyAllocator *allocator) {
+  if (node && node->type == SLEEPY_AST_ENV_BRIDGE && keyword) {
+    size_t len = strlen(keyword);
+    char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
+    if (dup) {
+      strcpy(dup, keyword);
+      node->as.env_bridge.keyword = dup;
+    }
+  }
+}
+
+void sleepy_ast_set_env_bridge_id(SleepyASTNode *node, const char *id,
+                                  SleepyAllocator *allocator) {
+  if (node && node->type == SLEEPY_AST_ENV_BRIDGE && id) {
+    size_t len = strlen(id);
+    char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
+    if (dup) {
+      strcpy(dup, id);
+      node->as.env_bridge.identifier = dup;
+    }
+  }
+}
+
+void sleepy_ast_set_env_bridge_string(SleepyASTNode *node, const char *str,
+                                      SleepyAllocator *allocator) {
+  if (node && node->type == SLEEPY_AST_ENV_BRIDGE && str) {
+    size_t len = strlen(str);
+    char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
+    if (dup) {
+      strcpy(dup, str);
+      node->as.env_bridge.string = dup;
+    }
+  }
+}
+
+void sleepy_ast_set_env_bridge_body(SleepyASTNode *node, SleepyASTNode *body) {
   if (node && node->type == SLEEPY_AST_ENV_BRIDGE)
-    return node->as.env_bridge.string;
-  return NULL;
+    node->as.env_bridge.body = body;
+}
+
+void sleepy_ast_set_foreach(SleepyASTNode *node, const char *index,
+                            const char *value, SleepyASTNode *generator,
+                            SleepyASTNode *body, SleepyAllocator *allocator) {
+  if (node && node->type == SLEEPY_AST_FOREACH) {
+    if (index) {
+      size_t len = strlen(index);
+      char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
+      if (dup) {
+        strcpy(dup, index);
+        node->as.foreach.index = dup;
+      }
+    }
+    if (value) {
+      size_t len = strlen(value);
+      char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
+      if (dup) {
+        strcpy(dup, value);
+        node->as.foreach.value = dup;
+      }
+    }
+    node->as.foreach.generator = generator;
+    node->as.foreach.body = body;
+  }
+}
+
+void sleepy_ast_set_for(SleepyASTNode *node, SleepyASTNode **init,
+                        size_t init_cnt, SleepyASTNode *cond,
+                        SleepyASTNode **inc, size_t inc_cnt,
+                        SleepyASTNode *body, SleepyAllocator *allocator) {
+  if (node && node->type == SLEEPY_AST_FOR) {
+    node->as.for_stmt.initializer = init;
+    node->as.for_stmt.init_count = init_cnt;
+    node->as.for_stmt.condition = cond;
+    node->as.for_stmt.increment = inc;
+    node->as.for_stmt.inc_count = inc_cnt;
+    node->as.for_stmt.body = body;
+  }
+}
+
+void sleepy_ast_set_return(SleepyASTNode *node, SleepyASTNode *value) {
+  if (node && node->type == SLEEPY_AST_RETURN)
+    node->as.control.value = value;
+}
+
+void sleepy_ast_set_break(SleepyASTNode *node) {
+  if (node && node->type == SLEEPY_AST_BREAK) {
+  }
+}
+
+void sleepy_ast_set_continue(SleepyASTNode *node) {
+  if (node && node->type == SLEEPY_AST_CONTINUE) {
+  }
+}
+
+void sleepy_ast_set_yield(SleepyASTNode *node, SleepyASTNode *value) {
+  if (node && node->type == SLEEPY_AST_YIELD)
+    node->as.control.value = value;
+}
+
+void sleepy_ast_set_throw(SleepyASTNode *node, SleepyASTNode *value) {
+  if (node && node->type == SLEEPY_AST_THROW)
+    node->as.control.value = value;
+}
+
+void sleepy_ast_set_assert(SleepyASTNode *node, SleepyASTNode *value) {
+  if (node && node->type == SLEEPY_AST_ASSERT)
+    node->as.control.value = value;
+}
+
+void sleepy_ast_set_try_catch(SleepyASTNode *node, SleepyASTNode *body,
+                              const char *var, SleepyASTNode *handler,
+                              SleepyAllocator *allocator) {
+  if (node && node->type == SLEEPY_AST_TRY_CATCH) {
+    node->as.try_catch.body = body;
+    if (var) {
+      size_t len = strlen(var);
+      char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
+      if (dup) {
+        strcpy(dup, var);
+        node->as.try_catch.value = dup;
+      }
+    }
+    node->as.try_catch.handler = handler;
+  }
+}
+
+void sleepy_ast_set_import(SleepyASTNode *node, const char *path,
+                           SleepyAllocator *allocator) {
+  if (node && node->type == SLEEPY_AST_IMPORT && path) {
+    size_t len = strlen(path);
+    char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
+    if (dup) {
+      strcpy(dup, path);
+      node->as.import_stmt.path = dup;
+    }
+  }
+}
+
+void sleepy_ast_set_backtick(SleepyASTNode *node, const char *cmd,
+                             SleepyAllocator *allocator) {
+  if (node && node->type == SLEEPY_AST_BACKTICK && cmd) {
+    size_t len = strlen(cmd);
+    char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
+    if (dup) {
+      strcpy(dup, cmd);
+      node->as.string_val = dup;
+    }
+  }
+}
+
+void sleepy_ast_set_call_target(SleepyASTNode *node, const char *target,
+                                SleepyAllocator *allocator) {
+  if (node && node->type == SLEEPY_AST_CALL && target) {
+    SleepyASTNode *id =
+        sleepy_ast_build_node(SLEEPY_AST_IDENTIFIER, node->line, allocator);
+    sleepy_ast_set_string_val(id, target, allocator);
+    node->as.call.target = id;
+  }
+}
+
+// Memory Management for FFI-built nodes
+void sleepy_parser_free_node(SleepyASTNode *node, SleepyAllocator *allocator) {
+  if (!node || !allocator)
+    return;
+
+  // 1. Free Value Strings
+  switch (node->type) {
+  case SLEEPY_AST_STRING:
+  case SLEEPY_AST_LITERAL:
+  case SLEEPY_AST_SCALAR:
+  case SLEEPY_AST_ARRAY:
+  case SLEEPY_AST_HASHTABLE:
+  case SLEEPY_AST_IDENTIFIER:
+  case SLEEPY_AST_CLASS_LITERAL:
+  case SLEEPY_AST_BACKTICK:
+  case SLEEPY_AST_ADDRESS:
+    if (node->as.string_val)
+      allocator->reallocate((void *)node->as.string_val, 0, NULL);
+    break;
+  default:
+    break;
+  }
+
+  // 2. Free recursive children and specific non-list children
+  switch (node->type) {
+  case SLEEPY_AST_SCRIPT:
+  case SLEEPY_AST_BLOCK:
+    if (node->as.block.statements) {
+      for (size_t i = 0; i < node->as.block.count; i++) {
+        if (node->as.block.statements[i])
+          sleepy_parser_free_node(node->as.block.statements[i], allocator);
+      }
+      allocator->reallocate(node->as.block.statements, 0, NULL);
+    }
+    break;
+  case SLEEPY_AST_CALL:
+    if (node->as.call.args) {
+      for (size_t i = 0; i < node->as.call.arg_count; i++) {
+        if (node->as.call.args[i])
+          sleepy_parser_free_node(node->as.call.args[i], allocator);
+      }
+      allocator->reallocate(node->as.call.args, 0, NULL);
+    }
+    if (node->as.call.target)
+      sleepy_parser_free_node(node->as.call.target, allocator);
+    break;
+  case SLEEPY_AST_ENV_BRIDGE:
+    if (node->as.env_bridge.body) {
+      sleepy_parser_free_node(node->as.env_bridge.body, allocator);
+    }
+    if (node->as.env_bridge.keyword) {
+      allocator->reallocate((void *)node->as.env_bridge.keyword, 0, NULL);
+    }
+    if (node->as.env_bridge.identifier) {
+      allocator->reallocate((void *)node->as.env_bridge.identifier, 0, NULL);
+    }
+    if (node->as.env_bridge.string) {
+      allocator->reallocate((void *)node->as.env_bridge.string, 0, NULL);
+    }
+    break;
+  case SLEEPY_AST_BINOP:
+    if (node->as.binop.left)
+      sleepy_parser_free_node(node->as.binop.left, allocator);
+    if (node->as.binop.right)
+      sleepy_parser_free_node(node->as.binop.right, allocator);
+    if (node->as.binop.op.start)
+      allocator->reallocate((void *)node->as.binop.op.start, 0, NULL);
+    break;
+  case SLEEPY_AST_UNARYOP:
+    if (node->as.unaryop.operand)
+      sleepy_parser_free_node(node->as.unaryop.operand, allocator);
+    if (node->as.unaryop.op.start)
+      allocator->reallocate((void *)node->as.unaryop.op.start, 0, NULL);
+    break;
+  case SLEEPY_AST_IF:
+    if (node->as.if_stmt.condition)
+      sleepy_parser_free_node(node->as.if_stmt.condition, allocator);
+    if (node->as.if_stmt.then_branch)
+      sleepy_parser_free_node(node->as.if_stmt.then_branch, allocator);
+    if (node->as.if_stmt.else_branch)
+      sleepy_parser_free_node(node->as.if_stmt.else_branch, allocator);
+    break;
+  case SLEEPY_AST_WHILE:
+    if (node->as.while_stmt.condition)
+      sleepy_parser_free_node(node->as.while_stmt.condition, allocator);
+    if (node->as.while_stmt.body)
+      sleepy_parser_free_node(node->as.while_stmt.body, allocator);
+    break;
+  case SLEEPY_AST_FOR:
+    if (node->as.for_stmt.initializer) {
+      for (size_t i = 0; i < node->as.for_stmt.init_count; i++)
+        if (node->as.for_stmt.initializer[i])
+          sleepy_parser_free_node(node->as.for_stmt.initializer[i], allocator);
+      allocator->reallocate(node->as.for_stmt.initializer, 0, NULL);
+    }
+    if (node->as.for_stmt.condition)
+      sleepy_parser_free_node(node->as.for_stmt.condition, allocator);
+    if (node->as.for_stmt.increment) {
+      for (size_t i = 0; i < node->as.for_stmt.inc_count; i++)
+        if (node->as.for_stmt.increment[i])
+          sleepy_parser_free_node(node->as.for_stmt.increment[i], allocator);
+      allocator->reallocate(node->as.for_stmt.increment, 0, NULL);
+    }
+    if (node->as.for_stmt.body)
+      sleepy_parser_free_node(node->as.for_stmt.body, allocator);
+    break;
+  case SLEEPY_AST_FOREACH:
+    if (node->as.foreach.generator)
+      sleepy_parser_free_node(node->as.foreach.generator, allocator);
+    if (node->as.foreach.body)
+      sleepy_parser_free_node(node->as.foreach.body, allocator);
+    if (node->as.foreach.index)
+      allocator->reallocate((void *)node->as.foreach.index, 0, NULL);
+    if (node->as.foreach.value)
+      allocator->reallocate((void *)node->as.foreach.value, 0, NULL);
+    break;
+  case SLEEPY_AST_ASSIGNMENT:
+    if (node->as.assign.left)
+      sleepy_parser_free_node(node->as.assign.left, allocator);
+    if (node->as.assign.right)
+      sleepy_parser_free_node(node->as.assign.right, allocator);
+    break;
+  case SLEEPY_AST_ARG:
+  case SLEEPY_AST_KV_PAIR:
+    if (node->as.arg.value)
+      sleepy_parser_free_node(node->as.arg.value, allocator);
+    if (node->type == SLEEPY_AST_KV_PAIR && node->as.arg.name)
+      sleepy_parser_free_node(node->as.arg.name, allocator);
+    break;
+  case SLEEPY_AST_TRY_CATCH:
+    if (node->as.try_catch.body)
+      sleepy_parser_free_node(node->as.try_catch.body, allocator);
+    if (node->as.try_catch.handler)
+      sleepy_parser_free_node(node->as.try_catch.handler, allocator);
+    if (node->as.try_catch.value)
+      allocator->reallocate((void *)node->as.try_catch.value, 0, NULL);
+    break;
+  case SLEEPY_AST_RETURN:
+  case SLEEPY_AST_THROW:
+  case SLEEPY_AST_ASSERT:
+  case SLEEPY_AST_YIELD:
+  case SLEEPY_AST_LOCAL:
+  case SLEEPY_AST_THIS:
+    if (node->as.control.value)
+      sleepy_parser_free_node(node->as.control.value, allocator);
+    break;
+  case SLEEPY_AST_IMPORT:
+    if (node->as.import_stmt.path)
+      allocator->reallocate((void *)node->as.import_stmt.path, 0, NULL);
+    break;
+  case SLEEPY_AST_INDEX:
+    if (node->as.index.container)
+      sleepy_parser_free_node(node->as.index.container, allocator);
+    if (node->as.index.element)
+      sleepy_parser_free_node(node->as.index.element, allocator);
+    break;
+  case SLEEPY_AST_OBJ_EXPR:
+    if (node->as.obj_expr.target)
+      sleepy_parser_free_node(node->as.obj_expr.target, allocator);
+    if (node->as.obj_expr.message)
+      sleepy_parser_free_node(node->as.obj_expr.message, allocator);
+    if (node->as.obj_expr.args) {
+      for (size_t i = 0; i < node->as.obj_expr.arg_count; i++)
+        if (node->as.obj_expr.args[i])
+          sleepy_parser_free_node(node->as.obj_expr.args[i], allocator);
+      allocator->reallocate(node->as.obj_expr.args, 0, NULL);
+    }
+    break;
+  default:
+    break;
+  }
+
+  // 3. Free the node itself
+  allocator->reallocate(node, 0, NULL);
 }
 
 static void append_indent(SleepyStringBuffer *buffer, int depth) {
@@ -2143,7 +2778,6 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
 
   case SLEEPY_AST_NUMBER: {
     char buf[64];
-    // Use %g for nice double formatting
     snprintf(buf, sizeof(buf), "%g", node->as.double_val);
     sleepy_string_buffer_append_string(buffer, buf, sleepy_utils_strlen(buf));
     break;
@@ -2151,7 +2785,6 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
 
   case SLEEPY_AST_LITERAL:
   case SLEEPY_AST_STRING: {
-    // Parser already includes quotes
     sleepy_string_buffer_append_string(
         buffer, node->as.string_val, sleepy_utils_strlen(node->as.string_val));
     break;
@@ -2165,9 +2798,25 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
   }
 
   case SLEEPY_AST_IDENTIFIER:
-  case SLEEPY_AST_ARRAY:
-  case SLEEPY_AST_HASHTABLE:
   case SLEEPY_AST_CLASS_LITERAL: {
+    sleepy_string_buffer_append_string(
+        buffer, node->as.string_val, sleepy_utils_strlen(node->as.string_val));
+    break;
+  }
+
+  case SLEEPY_AST_ARRAY: {
+    if (node->as.string_val && node->as.string_val[0] != '@') {
+      sleepy_string_buffer_append_char(buffer, '@');
+    }
+    sleepy_string_buffer_append_string(
+        buffer, node->as.string_val, sleepy_utils_strlen(node->as.string_val));
+    break;
+  }
+
+  case SLEEPY_AST_HASHTABLE: {
+    if (node->as.string_val && node->as.string_val[0] != '%') {
+      sleepy_string_buffer_append_char(buffer, '%');
+    }
     sleepy_string_buffer_append_string(
         buffer, node->as.string_val, sleepy_utils_strlen(node->as.string_val));
     break;
@@ -2200,8 +2849,12 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
     if (node->as.binop.negate) {
       sleepy_string_buffer_append_char(buffer, '!');
     }
-    sleepy_string_buffer_append_string(buffer, node->as.binop.op.start,
-                                       node->as.binop.op.length);
+    if (node->as.binop.op.start) {
+      sleepy_string_buffer_append_string(buffer, node->as.binop.op.start,
+                                         node->as.binop.op.length);
+    } else {
+      sleepy_string_buffer_append_string(buffer, "/* missing op */", 16);
+    }
     sleepy_string_buffer_append_char(buffer, ' ');
     format_node(node->as.binop.right, buffer, depth);
     break;
@@ -2210,18 +2863,25 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
   case SLEEPY_AST_ASSIGNMENT: {
     format_node(node->as.assign.left, buffer, depth);
     sleepy_string_buffer_append_char(buffer, ' ');
-    sleepy_string_buffer_append_string(buffer, node->as.assign.op.start,
-                                       node->as.assign.op.length);
+    if (node->as.assign.op.start) {
+      sleepy_string_buffer_append_string(buffer, node->as.assign.op.start,
+                                         node->as.assign.op.length);
+    } else {
+      sleepy_string_buffer_append_char(buffer, '=');
+    }
     sleepy_string_buffer_append_char(buffer, ' ');
     format_node(node->as.assign.right, buffer, depth);
     break;
   }
 
   case SLEEPY_AST_UNARYOP: {
-    // Very basic check for post ops
+    if (!node->as.unaryop.op.start) {
+      format_node(node->as.unaryop.operand, buffer, depth);
+      break;
+    }
     bool is_post = (node->as.unaryop.op.start[0] == '+' ||
                     node->as.unaryop.op.start[0] == '-') &&
-                   (node->as.unaryop.op.length == 2) && (depth > 0);
+                   (node->as.unaryop.op.length == 2);
     if (!is_post) {
       sleepy_string_buffer_append_string(buffer, node->as.unaryop.op.start,
                                          node->as.unaryop.op.length);
@@ -2284,9 +2944,13 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
           sleepy_utils_strlen(node->as.foreach.index));
       sleepy_string_buffer_append_string(buffer, " => ", 4);
     }
-    sleepy_string_buffer_append_string(
-        buffer, node->as.foreach.value,
-        sleepy_utils_strlen(node->as.foreach.value));
+    if (node->as.foreach.value) {
+      sleepy_string_buffer_append_string(
+          buffer, node->as.foreach.value,
+          sleepy_utils_strlen(node->as.foreach.value));
+    } else {
+      sleepy_string_buffer_append_string(buffer, "$_", 2);
+    }
     sleepy_string_buffer_append_string(buffer, " (", 2);
     format_node(node->as.foreach.generator, buffer, depth);
     sleepy_string_buffer_append_string(buffer, ") ", 2);
@@ -2354,9 +3018,11 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
     sleepy_string_buffer_append_string(buffer, "try ", 4);
     format_node(node->as.try_catch.body, buffer, depth);
     sleepy_string_buffer_append_string(buffer, " catch ", 7);
-    sleepy_string_buffer_append_string(
-        buffer, node->as.try_catch.value,
-        sleepy_utils_strlen(node->as.try_catch.value));
+    if (node->as.try_catch.value) {
+      sleepy_string_buffer_append_string(
+          buffer, node->as.try_catch.value,
+          sleepy_utils_strlen(node->as.try_catch.value));
+    }
     sleepy_string_buffer_append_char(buffer, ' ');
     format_node(node->as.try_catch.handler, buffer, depth);
     break;
@@ -2375,9 +3041,14 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
   }
 
   case SLEEPY_AST_ENV_BRIDGE: {
-    sleepy_string_buffer_append_string(
-        buffer, node->as.env_bridge.keyword,
-        sleepy_utils_strlen(node->as.env_bridge.keyword));
+    if (node->as.env_bridge.keyword) {
+      sleepy_string_buffer_append_string(
+          buffer, node->as.env_bridge.keyword,
+          sleepy_utils_strlen(node->as.env_bridge.keyword));
+    } else {
+      sleepy_string_buffer_append_string(buffer, "/* missing keyword */", 21);
+    }
+
     if (node->as.env_bridge.identifier) {
       sleepy_string_buffer_append_char(buffer, ' ');
       sleepy_string_buffer_append_string(
@@ -2399,11 +3070,7 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
 
   case SLEEPY_AST_IMPORT: {
     sleepy_string_buffer_append_string(buffer, "import ", 7);
-    sleepy_string_buffer_append_string(
-        buffer, node->as.import_stmt.target,
-        sleepy_utils_strlen(node->as.import_stmt.target));
     if (node->as.import_stmt.path) {
-      sleepy_string_buffer_append_string(buffer, " from: ", 7);
       sleepy_string_buffer_append_string(
           buffer, node->as.import_stmt.path,
           sleepy_utils_strlen(node->as.import_stmt.path));
@@ -2446,331 +3113,29 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
   case SLEEPY_AST_NOP: {
     break;
   }
+  case SLEEPY_AST_ADDRESS: {
+    sleepy_string_buffer_append_char(buffer, '&');
+    sleepy_string_buffer_append_string(
+        buffer, node->as.string_val, sleepy_utils_strlen(node->as.string_val));
+    break;
+  }
 
   default:
     sleepy_string_buffer_append_string(buffer, "/* unknown node type */", 23);
     break;
   }
 }
-// --- AST Builder APIs for FFI ---
 
-SleepyASTNode *sleepy_ast_build_node(SleepyASTNodeType type, int line,
-                                     SleepyAllocator *allocator) {
-  SleepyASTNode *node =
-      (SleepyASTNode *)allocator->reallocate(NULL, sizeof(SleepyASTNode), NULL);
-  if (!node)
-    return NULL;
-
-  node->type = type;
-  node->line = line;
-  return node;
+void sleepy_ast_set_index(SleepyASTNode *node, SleepyASTNode *container, SleepyASTNode *element) {
+    if (!node) return;
+    node->as.index.container = container;
+    node->as.index.element = element;
 }
 
-void sleepy_ast_set_string_val(SleepyASTNode *node, const char *str,
-                               SleepyAllocator *allocator) {
-  if (!node || !str || !allocator)
-    return;
-
-  // Duplicate the string using the allocator
-  size_t len = 0;
-  while (str[len] != '\0')
-    len++;
-  char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
-  if (dup) {
-    for (size_t i = 0; i <= len; i++) {
-      dup[i] = str[i];
-    }
-
-    // Assign based on node type
-    switch (node->type) {
-    case SLEEPY_AST_STRING:
-    case SLEEPY_AST_LITERAL:
-    case SLEEPY_AST_SCALAR:
-    case SLEEPY_AST_ARRAY:
-    case SLEEPY_AST_HASHTABLE:
-    case SLEEPY_AST_IDENTIFIER:
-    case SLEEPY_AST_CLASS_LITERAL:
-      node->as.string_val = dup;
-      break;
-    default:
-      allocator->reallocate(dup, 0, NULL); // Free if not supported
-      break;
-    }
-  }
-}
-
-void sleepy_ast_set_long_val(SleepyASTNode *node, long val) {
-  if (node && node->type == SLEEPY_AST_LONG) {
-    node->as.long_val = val;
-  }
-}
-
-void sleepy_ast_set_double_val(SleepyASTNode *node, double val) {
-  if (node && node->type == SLEEPY_AST_NUMBER) {
-    node->as.double_val = val;
-  }
-}
-
-void sleepy_ast_set_bool_val(SleepyASTNode *node, bool val) {
-  if (node && node->type == SLEEPY_AST_BOOLEAN) {
-    node->as.boolean = val;
-  }
-}
-
-void sleepy_ast_set_children(SleepyASTNode *node, SleepyASTNode **children,
-                             size_t count, SleepyAllocator *allocator) {
-  if (!node)
-    return;
-
-  // Allocate array for children pointers
-  SleepyASTNode **child_array = NULL;
-  if (count > 0 && children) {
-    child_array = (SleepyASTNode **)allocator->reallocate(
-        NULL, count * sizeof(SleepyASTNode *), NULL);
-    if (!child_array)
-      return;
-    for (size_t i = 0; i < count; i++) {
-      child_array[i] = children[i];
-    }
-  }
-
-  switch (node->type) {
-  case SLEEPY_AST_SCRIPT:
-  case SLEEPY_AST_BLOCK:
-    node->as.block.statements = child_array;
-    node->as.block.count = count;
-    node->as.block.capacity = count;
-    break;
-  case SLEEPY_AST_CALL:
-    node->as.call.args = child_array;
-    node->as.call.arg_count = count;
-    break;
-  default:
-    if (child_array) {
-      allocator->reallocate(child_array, 0, NULL);
-    }
-    break;
-  }
-}
-
-void sleepy_ast_set_binop(SleepyASTNode *node, SleepyASTNode *left,
-                          SleepyASTNode *right) {
-  if (node && node->type == SLEEPY_AST_BINOP) {
-    node->as.binop.left = left;
-    node->as.binop.right = right;
-  }
-}
-
-void sleepy_ast_set_if(SleepyASTNode *node, SleepyASTNode *condition,
-                       SleepyASTNode *then_branch, SleepyASTNode *else_branch) {
-  if (node && node->type == SLEEPY_AST_IF) {
-    node->as.if_stmt.condition = condition;
-    node->as.if_stmt.then_branch = then_branch;
-    node->as.if_stmt.else_branch = else_branch;
-  }
-}
-
-void sleepy_ast_set_while(SleepyASTNode *node, SleepyASTNode *condition,
-                          SleepyASTNode *body) {
-  if (node && node->type == SLEEPY_AST_WHILE) {
-    node->as.while_stmt.condition = condition;
-    node->as.while_stmt.body = body;
-  }
-}
-
-void sleepy_ast_set_arg(SleepyASTNode *node, SleepyASTNode *value) {
-  if (node && node->type == SLEEPY_AST_ARG) {
+void sleepy_ast_set_kv_pair(SleepyASTNode *node, SleepyASTNode *name, SleepyASTNode *value) {
+    if (!node) return;
+    node->as.arg.name = name;
     node->as.arg.value = value;
-  }
-}
-
-void sleepy_ast_set_assignment(SleepyASTNode *node, SleepyASTNode *target,
-                               SleepyASTNode *value) {
-  if (node && node->type == SLEEPY_AST_ASSIGNMENT) {
-    node->as.assign.left = target;
-    node->as.assign.right = value;
-    node->as.assign.op.type = SLEEPY_TOKEN_EQUAL;
-    node->as.assign.op.start = "=";
-    node->as.assign.op.length = 1;
-  }
-}
-
-void sleepy_ast_set_env_bridge(SleepyASTNode *node, const char *id,
-                               const char *str, SleepyASTNode **children,
-                               size_t count, SleepyAllocator *allocator) {
-  if (!node || node->type != SLEEPY_AST_ENV_BRIDGE || !allocator)
-    return;
-
-  if (id) {
-    // We unfortunately cannot cleanly re-create string fields for the env
-    // bridge Since the struct just expects `const char*` directly, we just
-    // allocate strings directly.
-    size_t len = strlen(id);
-    char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
-    if (dup) {
-      strcpy(dup, id);
-      node->as.env_bridge.identifier = dup;
-    }
-  }
-
-  if (str) {
-    size_t len = strlen(str);
-    char *dup = (char *)allocator->reallocate(NULL, len + 1, NULL);
-    if (dup) {
-      strcpy(dup, str);
-      node->as.env_bridge.string = dup;
-    }
-  }
-
-  // A bridge's body is a block node generally, but we can wrap it if needed.
-  if (count > 0 && children) {
-    SleepyASTNode *body_block =
-        sleepy_ast_build_node(SLEEPY_AST_BLOCK, node->line, allocator);
-    sleepy_ast_set_children(body_block, children, count, allocator);
-    node->as.env_bridge.body = body_block;
-  }
-}
-
-void sleepy_ast_set_call_target(SleepyASTNode *node, const char *target,
-                                SleepyAllocator *allocator) {
-  if (!node || node->type != SLEEPY_AST_CALL || !target || !allocator)
-    return;
-
-  // A call target is technically an expression. In Sleepy, standard calls
-  // resolve around identifiers. We'll construct an identifier node as the
-  // callee.
-  SleepyASTNode *callee =
-      sleepy_ast_build_node(SLEEPY_AST_IDENTIFIER, node->line, allocator);
-  sleepy_ast_set_string_val(callee, target, allocator);
-
-  node->as.call.target = callee;
-}
-
-// Memory Management for FFI-built nodes
-void sleepy_parser_free_node(SleepyASTNode *node, SleepyAllocator *allocator) {
-  if (!node || !allocator)
-    return;
-
-  // 1. Free Value Strings
-  switch (node->type) {
-  case SLEEPY_AST_STRING:
-  case SLEEPY_AST_LITERAL:
-  case SLEEPY_AST_SCALAR:
-  case SLEEPY_AST_ARRAY:
-  case SLEEPY_AST_HASHTABLE:
-  case SLEEPY_AST_IDENTIFIER:
-  case SLEEPY_AST_CLASS_LITERAL:
-    if (node->as.string_val)
-      allocator->reallocate((void *)node->as.string_val, 0, NULL);
-    break;
-  default:
-    break;
-  }
-
-  // 2. Free Children Recursively and their arrays
-  SleepyASTNode **children = NULL;
-  size_t count = 0;
-  // Note: sleepy_ast_get_children and sleepy_ast_free_children are assumed to
-  // exist and handle the retrieval and freeing of child arrays for
-  // SLEEPY_AST_SCRIPT, SLEEPY_AST_BLOCK, and SLEEPY_AST_CALL. If they don't
-  // exist, this part of the code will need to be adjusted to manually free the
-  // child arrays based on node type. For this exercise, we assume they are
-  // available or will be implemented. For now, we'll comment out the calls to
-  // avoid compilation errors if they're not defined.
-  // sleepy_ast_get_children(node, &children, &count, allocator);
-
-  // if (children) {
-  //   for (size_t i = 0; i < count; i++) {
-  //       if (children[i]) sleepy_parser_free_node(children[i], allocator);
-  //   }
-  //   sleepy_ast_free_children(children, allocator);
-  // }
-
-  // Manual freeing of child arrays for known types if helper functions are not
-  // available
-  switch (node->type) {
-  case SLEEPY_AST_SCRIPT:
-  case SLEEPY_AST_BLOCK:
-    if (node->as.block.statements) {
-      for (size_t i = 0; i < node->as.block.count; i++) {
-        if (node->as.block.statements[i])
-          sleepy_parser_free_node(node->as.block.statements[i], allocator);
-      }
-      allocator->reallocate(node->as.block.statements, 0, NULL);
-    }
-    break;
-  case SLEEPY_AST_CALL:
-    if (node->as.call.args) {
-      for (size_t i = 0; i < node->as.call.arg_count; i++) {
-        if (node->as.call.args[i])
-          sleepy_parser_free_node(node->as.call.args[i], allocator);
-      }
-      allocator->reallocate(node->as.call.args, 0, NULL);
-    }
-    break;
-  case SLEEPY_AST_ENV_BRIDGE:
-    if (node->as.env_bridge.body) {
-      sleepy_parser_free_node(node->as.env_bridge.body, allocator);
-    }
-    if (node->as.env_bridge.identifier) {
-      allocator->reallocate((void *)node->as.env_bridge.identifier, 0, NULL);
-    }
-    if (node->as.env_bridge.string) {
-      allocator->reallocate((void *)node->as.env_bridge.string, 0, NULL);
-    }
-    break;
-  default:
-    break;
-  }
-
-  // Free specific non-list children
-  switch (node->type) {
-  case SLEEPY_AST_BINOP:
-    if (node->as.binop.left)
-      sleepy_parser_free_node(node->as.binop.left, allocator);
-    if (node->as.binop.right)
-      sleepy_parser_free_node(node->as.binop.right, allocator);
-    break;
-  case SLEEPY_AST_UNARYOP:
-    if (node->as.unaryop.operand)
-      sleepy_parser_free_node(node->as.unaryop.operand, allocator);
-    break;
-  case SLEEPY_AST_IF:
-    if (node->as.if_stmt.condition)
-      sleepy_parser_free_node(node->as.if_stmt.condition, allocator);
-    if (node->as.if_stmt.then_branch)
-      sleepy_parser_free_node(node->as.if_stmt.then_branch, allocator);
-    if (node->as.if_stmt.else_branch)
-      sleepy_parser_free_node(node->as.if_stmt.else_branch, allocator);
-    break;
-  case SLEEPY_AST_WHILE:
-    if (node->as.while_stmt.condition)
-      sleepy_parser_free_node(node->as.while_stmt.condition, allocator);
-    if (node->as.while_stmt.body)
-      sleepy_parser_free_node(node->as.while_stmt.body, allocator);
-    break;
-  case SLEEPY_AST_ASSIGNMENT:
-    if (node->as.assign.left)
-      sleepy_parser_free_node(node->as.assign.left, allocator);
-    if (node->as.assign.right)
-      sleepy_parser_free_node(node->as.assign.right, allocator);
-    break;
-  case SLEEPY_AST_ARG:
-    if (node->as.arg.value)
-      sleepy_parser_free_node(node->as.arg.value, allocator);
-    break;
-  case SLEEPY_AST_CALL:
-    if (node->as.call.target)
-      sleepy_parser_free_node(node->as.call.target, allocator);
-    break;
-  case SLEEPY_AST_ENV_BRIDGE:
-    // already freeing internal bits above
-    break;
-  default:
-    break;
-  }
-
-  // 3. Free the node itself
-  allocator->reallocate(node, 0, NULL);
+    node->as.arg.trailing_sep = false;
 }
 

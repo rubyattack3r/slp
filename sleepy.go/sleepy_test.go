@@ -46,6 +46,30 @@ func TestASTFormat(t *testing.T) {
 	}
 }
 
+func TestASTFormatHashAndArray(t *testing.T) {
+	parser := NewParser()
+	defer parser.Close()
+	source := `
+%hash = %();
+@array = @();
+%hash["key"] = "value";
+@array[0] = "item";
+$val = %hash["key"];
+`
+	node, err := parser.Parse(source)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	formatted := node.Format(parser)
+	if !strings.Contains(formatted, "%hash = %()") {
+		t.Errorf("Format() output did not contain expected hash literal code.\nGot: %s", formatted)
+	}
+	if !strings.Contains(formatted, "@array = @()") {
+		t.Errorf("Format() output did not contain expected array literal code.\nGot: %s", formatted)
+	}
+}
+
 func TestASTWalk(t *testing.T) {
 	parser := NewParser()
 	defer parser.Close()

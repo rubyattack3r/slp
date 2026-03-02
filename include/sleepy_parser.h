@@ -199,6 +199,8 @@ typedef struct {
   SleepyToken previous;
   bool had_error;
   bool panic_mode;
+  int error_line;
+  const char *error_message;
   SleepyAllocator *allocator;
 } SleepyParser;
 

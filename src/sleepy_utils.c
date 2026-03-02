@@ -18,21 +18,29 @@ void sleepy_string_buffer_free(SleepyStringBuffer *buffer) {
 }
 
 void sleepy_string_buffer_append_char(SleepyStringBuffer *buffer, char c) {
-  if (buffer->capacity < buffer->length + 1) {
-    size_t new_capacity = buffer->capacity == 0 ? 8 : buffer->capacity * 2;
+  // We need space for the char PLUS the null terminator
+  if (buffer->capacity < buffer->length + 2) {
+    size_t new_capacity = buffer->capacity == 0 ? 16 : buffer->capacity * 2;
+    while (new_capacity < buffer->length + 2) {
+      new_capacity *= 2;
+    }
     buffer->data =
         (char *)SLEEPY_REALLOC(buffer->allocator, buffer->data, new_capacity);
     buffer->capacity = new_capacity;
   }
 
   buffer->data[buffer->length++] = c;
+  buffer->data[buffer->length] = '\0';
 }
 
 void sleepy_string_buffer_append_string(SleepyStringBuffer *buffer,
                                         const char *str, size_t length) {
-  if (buffer->capacity < buffer->length + length) {
-    size_t new_capacity = buffer->capacity == 0 ? 8 : buffer->capacity * 2;
-    while (new_capacity < buffer->length + length) {
+  if (length == 0)
+    return;
+  // We need space for the string PLUS the null terminator
+  if (buffer->capacity < buffer->length + length + 1) {
+    size_t new_capacity = buffer->capacity == 0 ? 16 : buffer->capacity * 2;
+    while (new_capacity < buffer->length + length + 1) {
       new_capacity *= 2;
     }
     buffer->data =
@@ -44,6 +52,7 @@ void sleepy_string_buffer_append_string(SleepyStringBuffer *buffer,
     buffer->data[buffer->length + i] = str[i];
   }
   buffer->length += length;
+  buffer->data[buffer->length] = '\0';
 }
 
 void *sleepy_utils_memcpy(void *dest, const void *src, size_t n) {
