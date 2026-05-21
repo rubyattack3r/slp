@@ -69,8 +69,7 @@
   },
   "users": {
     "alice": "Lead",
-    "bob": "Operator",
-    "charlie": "Reporter"
+    "bob": "Operator"
   },
   "builtins": {
     "dllinject": "Lead",

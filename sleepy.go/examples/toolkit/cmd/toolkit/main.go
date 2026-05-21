@@ -61,8 +61,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		// For the manual generate command, output to dist/patched if the user hasn't specified another workflow
-		outPath := "dist/patched/opsec.cna"
+		// For the manual generate command, output to dist/opsec.cna
+		outPath := "dist/opsec.cna"
 		if err := opsec.GenerateOpsecCNA(config, outPath); err != nil {
 			fmt.Printf("Error generating opsec.cna: %v\n", err)
 			os.Exit(1)

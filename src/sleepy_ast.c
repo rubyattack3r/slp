@@ -564,6 +564,25 @@ void sleepy_ast_set_arg(SleepyASTNode *node, SleepyASTNode *value) {
     node->as.arg.value = value;
 }
 
+void sleepy_ast_set_arg_with_name(SleepyASTNode *node, SleepyASTNode *name, SleepyASTNode *value) {
+  if (node && node->type == SLEEPY_AST_ARG) {
+    node->as.arg.name = name;
+    node->as.arg.value = value;
+  }
+}
+
+void sleepy_ast_set_obj_expr(SleepyASTNode *node, SleepyASTNode *target,
+                             SleepyASTNode *message, SleepyASTNode **args,
+                             size_t arg_count, SleepyAllocator *allocator) {
+  (void)allocator;
+  if (node && node->type == SLEEPY_AST_OBJ_EXPR) {
+    node->as.obj_expr.target = target;
+    node->as.obj_expr.message = message;
+    node->as.obj_expr.args = args;
+    node->as.obj_expr.arg_count = arg_count;
+  }
+}
+
 void sleepy_ast_set_assignment(SleepyASTNode *node, SleepyASTNode *target,
                                SleepyASTNode *value) {
   if (node && node->type == SLEEPY_AST_ASSIGNMENT) {
@@ -645,6 +664,7 @@ void sleepy_ast_set_for(SleepyASTNode *node, SleepyASTNode **init,
                         size_t init_cnt, SleepyASTNode *cond,
                         SleepyASTNode **inc, size_t inc_cnt,
                         SleepyASTNode *body, SleepyAllocator *allocator) {
+  (void)allocator;
   if (node && node->type == SLEEPY_AST_FOR) {
     node->as.for_stmt.initializer = init;
     node->as.for_stmt.init_count = init_cnt;
@@ -801,14 +821,10 @@ void sleepy_parser_free_node(SleepyASTNode *node, SleepyAllocator *allocator) {
       sleepy_parser_free_node(node->as.binop.left, allocator);
     if (node->as.binop.right)
       sleepy_parser_free_node(node->as.binop.right, allocator);
-    if (node->as.binop.op.start)
-      allocator->reallocate((void *)node->as.binop.op.start, 0, NULL);
     break;
   case SLEEPY_AST_UNARYOP:
     if (node->as.unaryop.operand)
       sleepy_parser_free_node(node->as.unaryop.operand, allocator);
-    if (node->as.unaryop.op.start)
-      allocator->reallocate((void *)node->as.unaryop.op.start, 0, NULL);
     break;
   case SLEEPY_AST_IF:
     if (node->as.if_stmt.condition)
@@ -986,8 +1002,10 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
 
   case SLEEPY_AST_LITERAL:
   case SLEEPY_AST_STRING: {
+    sleepy_string_buffer_append_char(buffer, '"');
     sleepy_string_buffer_append_string(
         buffer, node->as.string_val, sleepy_utils_strlen(node->as.string_val));
+    sleepy_string_buffer_append_char(buffer, '"');
     break;
   }
 

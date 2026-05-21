@@ -43,7 +43,7 @@ func Patch(srcDir, outDir, rootFile string) error {
 			parser := sleepy.NewParser()
 			defer parser.Close()
 
-			if err := patchScript(parser, path, targetPath); err != nil {
+			if err := patchScript(parser, path, targetPath, relPath); err != nil {
 				return fmt.Errorf("failed to patch %s: %v", path, err)
 			}
 			scripts = append(scripts, relPath)
@@ -68,7 +68,7 @@ func Patch(srcDir, outDir, rootFile string) error {
 	return nil
 }
 
-func patchScript(parser *sleepy.Parser, srcPath, dstPath string) error {
+func patchScript(parser *sleepy.Parser, srcPath, dstPath, relPath string) error {
 	content, err := os.ReadFile(srcPath)
 	if err != nil {
 		return err
@@ -79,35 +79,81 @@ func patchScript(parser *sleepy.Parser, srcPath, dstPath string) error {
 		return err
 	}
 
+	relDir := filepath.ToSlash(filepath.Dir(relPath))
+
 	// Transform the AST
 	node = node.Walk(func(n *sleepy.Node) *sleepy.Node {
 		if n == nil {
 			return nil
 		}
 
-		if n.Type == sleepy.AstEnvBridge && n.Value == "alias" {
-			// Find the identifier child and rename it
-			for _, child := range n.Children {
-				if child.Type == sleepy.AstIdentifier {
-					if name, ok := child.Value.(string); ok {
-						child.Value = "toolkit_" + name
+		// 1. Convert alias to sub
+		if n.Type == sleepy.AstEnvBridge {
+			if val, ok := n.Value.(string); ok {
+				kw := strings.ToLower(strings.TrimSpace(val))
+				if kw == "alias" {
+					n.Value = "sub"
+					// Prefix the identifier child with toolkit_
+					for _, child := range n.Children {
+						if child.Type == sleepy.AstIdentifier {
+							if name, ok := child.Value.(string); ok {
+								if !strings.HasPrefix(name, "toolkit_") {
+									child.Value = "toolkit_" + name
+								}
+							}
+							break
+						}
 					}
-					break
 				}
 			}
 		}
 
+		// 2. Rename functions and wrap paths with relDir
 		if n.Type == sleepy.AstCall {
-			switch n.Value {
-			case "openf":
-				n.Value = "toolkit_openf"
-			case "script_resource":
-				n.Value = "toolkit_resource"
-			case "include":
-				// For include, we might want to ensure the path is consistent with the new structure
-				// But since we preserve the directory structure, it should stay mostly the same
-				// except maybe if it was double-dot relative.
-				// For now, we'll keep it as is unless we find issues.
+			if name, ok := n.Value.(string); ok {
+				isResourceCall := false
+				switch name {
+				case "openf":
+					n.Value = "toolkit_openf"
+					// Do NOT wrap openf arguments, as they are usually already wrapped by toolkit_resource
+				case "script_resource":
+					n.Value = "toolkit_resource"
+					isResourceCall = true
+				case "toolkit_resource", "include":
+					isResourceCall = true
+				}
+
+				if isResourceCall && relDir != "." && len(n.Children) > 0 {
+					// Check if we already patched this by looking for our prefix
+					alreadyPatched := false
+					if n.Children[0].Type == sleepy.AstBinop && n.Children[0].Value == "." {
+						if len(n.Children[0].Children) > 0 {
+							first := n.Children[0].Children[0]
+							if first.Type == sleepy.AstString {
+								if s, ok := first.Value.(string); ok && strings.Contains(s, relDir+"/") {
+									alreadyPatched = true
+								}
+							}
+						}
+					}
+
+					if !alreadyPatched {
+						// Wrap the argument with: "relDir/" . arg
+						origArg := n.Children[0]
+						newArg := &sleepy.Node{
+							Type:  sleepy.AstBinop,
+							Value: ".",
+							Children: []*sleepy.Node{
+								{
+									Type:  sleepy.AstString,
+									Value: fmt.Sprintf("\"%s/\"", relDir),
+								},
+								origArg,
+							},
+						}
+						n.Children[0] = newArg
+					}
+				}
 			}
 		}
 
@@ -156,12 +202,7 @@ func generateRootCNA(rootPath, outDir string, scripts []string) error {
 $toolkit_location = script_resource("");
 
 sub toolkit_openf {
-    local('$path');
-    $path = $1;
-    if ($toolkit_location) {
-        return openf($toolkit_location . "/" . $path);
-    }
-    return openf($path);
+    return openf($1);
 }
 
 sub toolkit_resource {

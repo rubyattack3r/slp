@@ -1,0 +1,3 @@
+sub external_read {
+    println("Included reading from " . script_resource("external.o"));
+}

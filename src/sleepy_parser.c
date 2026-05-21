@@ -203,13 +203,39 @@ static SleepyASTNode *identifier(SleepyParser *parser, SleepyASTNode *left,
   return node;
 }
 
+static const char *copy_unquoted_lexeme(SleepyParser *parser, SleepyToken *token) {
+    if (token->length < 2) return sleepy_lexer_copy_lexeme(&parser->lexer, token);
+    size_t inner_len = token->length - 2;
+    char *str = (char *)parser->allocator->reallocate(NULL, inner_len + 1, NULL);
+    if (!str) return NULL;
+    const char *src = token->start + 1;
+    size_t wi = 0;
+    for (size_t ri = 0; ri < inner_len; ri++) {
+        if (src[ri] == '\\' && ri + 1 < inner_len) {
+            char next = src[ri + 1];
+            switch (next) {
+                case 'n': str[wi++] = '\n'; ri++; break;
+                case 't': str[wi++] = '\t'; ri++; break;
+                case 'r': str[wi++] = '\r'; ri++; break;
+                case '\\': str[wi++] = '\\'; ri++; break;
+                case '"': str[wi++] = '"'; ri++; break;
+                case '\'': str[wi++] = '\''; ri++; break;
+                default: str[wi++] = src[ri]; break;
+            }
+        } else {
+            str[wi++] = src[ri];
+        }
+    }
+    str[wi] = '\0';
+    return str;
+}
+
 static SleepyASTNode *string_val(SleepyParser *parser, SleepyASTNode *left,
                                  bool canAssign) {
   (void)canAssign;
   (void)left;
   SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_STRING);
-  node->as.string_val =
-      sleepy_lexer_copy_lexeme(&parser->lexer, &parser->previous);
+  node->as.string_val = copy_unquoted_lexeme(parser, &parser->previous);
   return node;
 }
 
@@ -275,7 +301,9 @@ static SleepyASTNode *array(SleepyParser *parser, SleepyASTNode *left,
     consume(parser, SLEEPY_TOKEN_LEFT_PAREN, "Expect '(' after '@'.");
     SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_CALL);
     SleepyASTNode *target = allocate_node(parser, SLEEPY_AST_ARRAY);
-    target->as.string_val = "@";
+    char *at = (char *)parser->allocator->reallocate(NULL, 2, parser->allocator->user_data);
+    if (at) sleepy_utils_strcpy(at, "@");
+    target->as.string_val = at;
     node->as.call.target = target;
     extern SleepyASTNode **parse_args(SleepyParser * parser, size_t *count,
                                       SleepyTokenType endToken);
@@ -301,7 +329,9 @@ static SleepyASTNode *hash(SleepyParser *parser, SleepyASTNode *left,
     consume(parser, SLEEPY_TOKEN_LEFT_PAREN, "Expect '(' after '%'.");
     SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_CALL);
     SleepyASTNode *target = allocate_node(parser, SLEEPY_AST_HASHTABLE);
-    target->as.string_val = "%";
+    char *pct = (char *)parser->allocator->reallocate(NULL, 2, parser->allocator->user_data);
+    if (pct) sleepy_utils_strcpy(pct, "%");
+    target->as.string_val = pct;
     node->as.call.target = target;
     extern SleepyASTNode **parse_args(SleepyParser * parser, size_t *count,
                                       SleepyTokenType endToken);
@@ -911,7 +941,18 @@ static SleepyASTNode *foreach_statement(SleepyParser *parser) {
   SleepyASTNode *body = block(parser);
   SleepyASTNode *node = allocate_node(parser, SLEEPY_AST_FOREACH);
   node->as.foreach.index = (key_node) ? key_node->as.string_val : NULL;
-  node->as.foreach.value = (val_node) ? val_node->as.string_val : "stub_var";
+  
+  if (val_node) {
+      node->as.foreach.value = val_node->as.string_val;
+  } else {
+      char *stub = (char *)parser->allocator->reallocate(NULL, 9, parser->allocator->user_data);
+      if (stub) sleepy_utils_strcpy(stub, "stub_var");
+      node->as.foreach.value = stub;
+  }
+  
+  if (key_node) SLEEPY_FREE(parser->allocator, key_node);
+  if (val_node) SLEEPY_FREE(parser->allocator, val_node);
+
   node->as.foreach.generator = source;
   node->as.foreach.body = body;
   return node;

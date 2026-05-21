@@ -59,8 +59,12 @@ void sleepy_ast_set_if(SleepyASTNode *node, SleepyASTNode *condition,
 void sleepy_ast_set_while(SleepyASTNode *node, SleepyASTNode *condition,
                           SleepyASTNode *body);
 void sleepy_ast_set_arg(SleepyASTNode *node, SleepyASTNode *value);
+void sleepy_ast_set_arg_with_name(SleepyASTNode *node, SleepyASTNode *name, SleepyASTNode *value);
 void sleepy_ast_set_assignment(SleepyASTNode *node, SleepyASTNode *target,
                                SleepyASTNode *value);
+void sleepy_ast_set_obj_expr(SleepyASTNode *node, SleepyASTNode *target,
+                             SleepyASTNode *message, SleepyASTNode **args,
+                             size_t arg_count, SleepyAllocator *allocator);
 void sleepy_ast_set_env_bridge(SleepyASTNode *node, const char *id,
                                const char *str, SleepyASTNode **children,
                                size_t count, SleepyAllocator *allocator);
@@ -97,6 +101,7 @@ void sleepy_ast_set_backtick(SleepyASTNode *node, const char *cmd,
 // Memory Management
 void sleepy_parser_free_node(SleepyASTNode *node, SleepyAllocator *allocator);
 
-#endif // SLEEPY_AST_H
 void sleepy_ast_set_index(SleepyASTNode *node, SleepyASTNode *container, SleepyASTNode *element);
 void sleepy_ast_set_kv_pair(SleepyASTNode *node, SleepyASTNode *name, SleepyASTNode *value);
+
+#endif // SLEEPY_AST_H

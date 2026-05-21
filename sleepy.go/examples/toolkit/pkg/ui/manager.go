@@ -50,7 +50,7 @@ type model struct {
 }
 
 func initialModel(cmds []opsec.CommandInfo, distDir, patchedDir string) model {
-	roles := []string{"Lead", "Operator", "Reporter"}
+	roles := []string{"Admin", "Lead", "Operator"}
 	builtinList := []string{"shell", "run", "execute-assembly", "powerpick", "psinject", "pth", "spawn", "spawnu", "inject", "shinject", "dllinject", "wdigest", "mimikatz"}
 	
 	// Load existing config if available
@@ -73,7 +73,7 @@ func initialModel(cmds []opsec.CommandInfo, distDir, patchedDir string) model {
 	cmdRoles := make(map[string]string)
 	for _, c := range cmds {
 		role, ok := config.Commands[c.Name]
-		if !ok {
+		if !ok || role == "" || role == "Reporter" {
 			role = "Operator"
 		}
 		cmdRoles[c.Name] = role
@@ -81,13 +81,16 @@ func initialModel(cmds []opsec.CommandInfo, distDir, patchedDir string) model {
 
 	userRoles := make(map[string]string)
 	for u, r := range config.Users {
+		if r == "Reporter" {
+			continue // Filter out Reporter from UI
+		}
 		userRoles[u] = r
 	}
 
 	builtinStatus := make(map[string]string)
 	for _, b := range builtinList {
 		status, ok := config.Builtins[b]
-		if !ok || status == "" {
+		if !ok || status == "" || status == "Reporter" {
 			status = "Operator" 
 		}
 		builtinStatus[b] = status

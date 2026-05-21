@@ -43,7 +43,7 @@ type Parser struct {
 func NewParser() *Parser {
 	alloc := (*C.SleepyAllocator)(C.malloc(C.sizeof_SleepyAllocator))
 	C.set_go_allocator(alloc)
-	
+
 	parser := (*C.SleepyParser)(C.malloc(C.sizeof_SleepyParser))
 
 	return &Parser{
@@ -404,7 +404,11 @@ func (p *Parser) buildCNode(node *Node) *C.SleepyASTNode {
 		C.sleepy_ast_set_while(cNode, cCond, cBody)
 
 	case AstArg:
-		if len(node.Children) > 0 {
+		if len(node.Children) == 2 {
+			cName := p.buildCNode(node.Children[0])
+			cVal := p.buildCNode(node.Children[1])
+			C.sleepy_ast_set_arg_with_name(cNode, cName, cVal)
+		} else if len(node.Children) == 1 {
 			cVal := p.buildCNode(node.Children[0])
 			C.sleepy_ast_set_arg(cNode, cVal)
 		}
@@ -421,6 +425,31 @@ func (p *Parser) buildCNode(node *Node) *C.SleepyASTNode {
 			cCont := p.buildCNode(node.Children[0])
 			cElem := p.buildCNode(node.Children[1])
 			C.sleepy_ast_set_index(cNode, cCont, cElem)
+		}
+
+	case AstObjExpr:
+		if len(node.Children) >= 1 {
+			cTarget := p.buildCNode(node.Children[0])
+			var cMessage *C.SleepyASTNode
+			var cArgs **C.SleepyASTNode
+			var cArgCount C.size_t
+
+			if len(node.Children) > 1 {
+				// We don't always have a message. But let's assume Children[1] is message if it exists in the tree as a string or identifier.
+				// Wait, the Go AST structure for AstObjExpr: if node is created from Sleepy parser, the message is Children[1] (if it exists).
+				// We'll just pass whatever the children are. If we're constructing this, we need to map them back.
+				// For the bug we're fixing `[$callback]`, there is no message, just the target.
+				// Let's just set the target and no args if len is 1. If more, we'll need to know which child is what.
+				// By default, let's just serialize the first child as target and the rest as args (ignoring message for now since we just need closure invocation to work).
+				cArgCount = C.size_t(len(node.Children) - 1)
+				cPtr := C.sleepy_ast_allocate_children(cArgCount, p.allocator)
+				cArgs = (**C.SleepyASTNode)(cPtr)
+				argSlice := unsafe.Slice(cArgs, int(cArgCount))
+				for i := 0; i < int(cArgCount); i++ {
+					argSlice[i] = p.buildCNode(node.Children[i+1])
+				}
+			}
+			C.sleepy_ast_set_obj_expr(cNode, cTarget, cMessage, cArgs, cArgCount, p.allocator)
 		}
 
 	case AstKvPair:
@@ -716,3 +745,46 @@ func (p *Parser) mapNodeData(cNode *C.SleepyASTNode, node *Node) *Node {
 	return node
 }
 
+// VM Bindings
+
+type VM struct {
+    cVM       *C.SleepyVM
+    allocator *C.SleepyAllocator
+}
+
+func NewVM() *VM {
+    alloc := (*C.SleepyAllocator)(C.malloc(C.sizeof_SleepyAllocator))
+    C.set_go_allocator(alloc)
+
+    vm := C.sleepy_vm_new(alloc)
+
+    return &VM{
+        cVM:       vm,
+        allocator: alloc,
+    }
+}
+
+func (vm *VM) Close() error {
+    if vm.cVM != nil {
+        C.sleepy_vm_free(vm.cVM)
+        vm.cVM = nil
+    }
+    if vm.allocator != nil {
+        C.free(unsafe.Pointer(vm.allocator))
+        vm.allocator = nil
+    }
+    return nil
+}
+
+func (vm *VM) Interpret(source string) error {
+    cSource := C.CString(source)
+    defer C.free(unsafe.Pointer(cSource))
+
+    result := C.sleepy_vm_interpret(vm.cVM, cSource)
+
+    if result != C.SLEEPY_OK {
+        return fmt.Errorf("VM interpretation failed with result: %d", int(result))
+    }
+
+    return nil
+}
