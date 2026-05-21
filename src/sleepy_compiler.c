@@ -168,7 +168,7 @@ static void compile_node(SleepyCompiler *compiler, SleepyASTNode *node) {
                     stype != SLEEPY_AST_TRY_CATCH && stype != SLEEPY_AST_RETURN &&
                     stype != SLEEPY_AST_THROW && stype != SLEEPY_AST_YIELD &&
                     stype != SLEEPY_AST_BREAK && stype != SLEEPY_AST_CONTINUE &&
-                    stype != SLEEPY_AST_NOP && stype != SLEEPY_AST_ASSIGNMENT) {
+                    stype != SLEEPY_AST_NOP) {
                     
                     auto_print = true;
                 }
@@ -323,7 +323,8 @@ static void compile_node(SleepyCompiler *compiler, SleepyASTNode *node) {
             switch (node->as.assign.left->type) {
             case SLEEPY_AST_SCALAR:
             case SLEEPY_AST_ARRAY:
-            case SLEEPY_AST_HASHTABLE: {
+            case SLEEPY_AST_HASHTABLE:
+            case SLEEPY_AST_IDENTIFIER: {
                 if (node->as.assign.left->as.string_val) {
                     uint32_t slen = (uint32_t)sleepy_utils_strlen(node->as.assign.left->as.string_val);
                     if (node->as.assign.op.type != SLEEPY_TOKEN_EQUAL) {
