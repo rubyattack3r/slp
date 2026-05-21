@@ -53,3 +53,7 @@ Makefile.bak
 coverage.info
 sleepy
 bench_sleepy
+.sleepy_history
+*.test
+print_*
+run_*
