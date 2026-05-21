@@ -1,7 +1,7 @@
 CC ?= gcc
 CXX ?= g++
 
-CFLAGS = -std=c99 -Wall -Wextra -Iinclude -Ideps/bestline
+CFLAGS = -g -O0 -std=c99 -Wall -Wextra -Iinclude -Ideps/bestline
 CXXFLAGS = -std=c++11 -Wall -Wextra -Iinclude -I.
 
 SRC = $(wildcard src/*.c)

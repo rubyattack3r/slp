@@ -56,6 +56,8 @@ static void __attribute__((unused)) compiler_error(SleepyCompiler *compiler, int
     compiler->error_message = msg;
 }
 
+static SleepyObjString *intern_str(SleepyCompiler *compiler, const char *chars, uint32_t len);
+
 static void init_compiler(SleepyCompiler *compiler, SleepyCompiler *enclosing,
                           SleepyVM *vm, SleepyAllocator *allocator) {
     compiler->enclosing = enclosing;
@@ -76,6 +78,16 @@ static void init_compiler(SleepyCompiler *compiler, SleepyCompiler *enclosing,
     local->depth = 0;
     local->is_captured = false;
     local->name = NULL;
+
+    if (enclosing != NULL) {
+        for (int i = 1; i <= 9; i++) {
+            char name[2] = {'0' + i, '\0'};
+            SleepyLocal *arg_local = &compiler->locals[compiler->local_count++];
+            arg_local->depth = 0;
+            arg_local->is_captured = false;
+            arg_local->name = intern_str(compiler, name, 1);
+        }
+    }
 }
 
 static void begin_scope(SleepyCompiler *compiler) {
@@ -606,19 +618,14 @@ static void compile_node(SleepyCompiler *compiler, SleepyASTNode *node) {
             emit_byte(compiler, sub_compiler.upvalues[i].is_local ? 1 : 0, line);
             emit_byte(compiler, sub_compiler.upvalues[i].index, line);
         }
-        if (node->as.env_bridge.keyword) {
+        if (node->as.env_bridge.keyword && node->as.env_bridge.identifier) {
             SleepyObjString *kw = intern_str(compiler, node->as.env_bridge.keyword,
                 (uint32_t)sleepy_utils_strlen(node->as.env_bridge.keyword));
             emit_byte(compiler, OP_BRIDGE_REGISTER, line);
             emit_short(compiler, make_constant(compiler, SLEEPY_OBJ_VAL(kw)), line);
-            if (node->as.env_bridge.identifier) {
-                SleepyObjString *name = intern_str(compiler, node->as.env_bridge.identifier,
-                    (uint32_t)sleepy_utils_strlen(node->as.env_bridge.identifier));
-                emit_short(compiler, make_constant(compiler, SLEEPY_OBJ_VAL(name)), line);
-            } else {
-                emit_short(compiler, make_constant(compiler, SLEEPY_OBJ_VAL(
-                    intern_str(compiler, "", 0))), line);
-            }
+            SleepyObjString *name = intern_str(compiler, node->as.env_bridge.identifier,
+                (uint32_t)sleepy_utils_strlen(node->as.env_bridge.identifier));
+            emit_short(compiler, make_constant(compiler, SLEEPY_OBJ_VAL(name)), line);
         }
         break;
     }
@@ -645,10 +652,22 @@ static void compile_node(SleepyCompiler *compiler, SleepyASTNode *node) {
         break;
     case SLEEPY_AST_OBJ_EXPR:
         compile_expr(compiler, node->as.obj_expr.target);
-        if (node->as.obj_expr.message)
+        if (node->as.obj_expr.message == NULL) {
+            // Closure invocation: [$target arg1, arg2]
+            for (size_t i = 0; i < node->as.obj_expr.arg_count; i++) {
+                compile_node(compiler, node->as.obj_expr.args[i]);
+            }
+            emit_byte(compiler, OP_CALL, line);
+            emit_byte(compiler, (uint8_t)node->as.obj_expr.arg_count, line);
+        } else {
+            // Method invocation (unimplemented semantics, just pop message for now)
             compile_expr(compiler, node->as.obj_expr.message);
-        emit_byte(compiler, OP_OBJ_EXPR, line);
-        emit_byte(compiler, (uint8_t)node->as.obj_expr.arg_count, line);
+            for (size_t i = 0; i < node->as.obj_expr.arg_count; i++) {
+                compile_node(compiler, node->as.obj_expr.args[i]);
+            }
+            emit_byte(compiler, OP_OBJ_EXPR, line);
+            emit_byte(compiler, (uint8_t)node->as.obj_expr.arg_count, line);
+        }
         break;
     case SLEEPY_AST_BACKTICK: {
         if (node->as.string_val) {
@@ -736,7 +755,9 @@ static void named_variable(SleepyCompiler *compiler, const char *name, uint32_t 
     }
 
     if (assign) {
-        if (set_op == OP_LOAD_LOCAL || set_op == OP_STORE_LOCAL) {
+        if (set_op >= OP_STORE_LOCAL_0 && set_op <= OP_STORE_LOCAL_7) {
+            emit_byte(compiler, set_op, line);
+        } else if (set_op == OP_STORE_LOCAL) {
             emit_byte(compiler, OP_STORE_LOCAL, line);
             emit_byte(compiler, (uint8_t)arg, line);
         } else if (set_op == OP_STORE_UPVALUE) {

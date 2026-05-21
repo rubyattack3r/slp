@@ -330,18 +330,25 @@ static void define_builtins(SleepyVM *vm) {
 }
 
 static bool call_closure(SleepyVM *vm, SleepyObjClosure *closure, int arg_count) {
-    if (arg_count != closure->function->arity) {
-            sleepy_vm_runtime_error(vm, "Wrong number of arguments.");
-        return false;
-    }
     if (vm->frame_count >= SLEEPY_MAX_FRAMES) {
         sleepy_vm_runtime_error(vm, "Stack overflow.");
         return false;
     }
+    
+    // Pad stack with $null so we have at least 9 argument slots (for $1 to $9)
+    for (int i = arg_count; i < 9; i++) {
+        sleepy_vm_push(vm, SLEEPY_NULL_VAL);
+    }
+    // Note: The frame's slots pointer should still point to the closure object, 
+    // which was pushed BEFORE the arg_count arguments.
+    // So if arg_count was 2, we pushed 7 nulls. The total arguments is now max(arg_count, 9).
+    // Actually, `call_value` popped nothing. The stack has: [closure] [arg1] ... [argN] [nulls...]
+    int frame_slots = (arg_count < 9) ? 9 : arg_count;
+    
     SleepyCallFrame *frame = &vm->frames[vm->frame_count++];
     frame->closure = closure;
     frame->ip = closure->function->chunk->code;
-    frame->slots = vm->stack_top - arg_count - 1;
+    frame->slots = vm->stack_top - frame_slots - 1;
     return true;
 }
 
