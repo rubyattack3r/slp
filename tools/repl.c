@@ -64,6 +64,39 @@ static int check_balance(const char *str, int *braces, int *parens, int *bracket
     return in_string;
 }
 
+static void completion(const char *buf, int pos, bestlineCompletions *lc) {
+    const char *keywords[] = {
+        "println", "size", "array", "keys", "typeof", "remove", "push", "pop", "assert",
+        "if", "else", "while", "for", "foreach", "return", "break", "continue",
+        "sub", "alias", "try", "catch", "throw", "true", "false", "null", NULL
+    };
+
+    int start = pos;
+    while (start > 0 && ((buf[start - 1] >= 'a' && buf[start - 1] <= 'z') || 
+                         (buf[start - 1] >= 'A' && buf[start - 1] <= 'Z') || 
+                         buf[start - 1] == '_' || 
+                         (buf[start - 1] >= '0' && buf[start - 1] <= '9'))) {
+        start--;
+    }
+
+    int word_len = pos - start;
+    if (word_len == 0) return;
+
+    for (int i = 0; keywords[i] != NULL; i++) {
+        if (strncmp(buf + start, keywords[i], word_len) == 0) {
+            size_t new_len = start + strlen(keywords[i]) + strlen(buf + pos) + 1;
+            char *new_buf = malloc(new_len);
+            if (new_buf) {
+                strncpy(new_buf, buf, start);
+                strcpy(new_buf + start, keywords[i]);
+                strcpy(new_buf + start + strlen(keywords[i]), buf + pos);
+                bestlineAddCompletion(lc, new_buf);
+                free(new_buf);
+            }
+        }
+    }
+}
+
 int main(int argc, char **argv) {
     SleepyVM *vm = sleepy_vm_new(&allocator);
     sleepy_vm_set_error_fn(vm, repl_error, NULL);
@@ -92,6 +125,7 @@ int main(int argc, char **argv) {
     printf("SleepyVM REPL v0.1\n");
     printf("Type 'exit' to quit.\n");
     
+    bestlineSetCompletionCallback(completion);
     bestlineHistoryLoad(".sleepy_history");
 
     char *buffer = NULL;
