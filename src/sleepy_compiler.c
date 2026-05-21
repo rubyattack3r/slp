@@ -158,21 +158,41 @@ static void compile_node(SleepyCompiler *compiler, SleepyASTNode *node) {
     case SLEEPY_AST_SCRIPT:
     case SLEEPY_AST_BLOCK: {
         for (size_t i = 0; i < node->as.block.count; i++) {
+            bool auto_print = false;
+            SleepyASTNodeType stype = node->as.block.statements[i]->type;
+
+            if (compiler->vm->repl_mode && node->type == SLEEPY_AST_SCRIPT && i == node->as.block.count - 1) {
+                if (stype != SLEEPY_AST_ENV_BRIDGE && stype != SLEEPY_AST_IF &&
+                    stype != SLEEPY_AST_WHILE && stype != SLEEPY_AST_FOR &&
+                    stype != SLEEPY_AST_FOREACH && stype != SLEEPY_AST_ASSERT &&
+                    stype != SLEEPY_AST_TRY_CATCH && stype != SLEEPY_AST_RETURN &&
+                    stype != SLEEPY_AST_THROW && stype != SLEEPY_AST_YIELD &&
+                    stype != SLEEPY_AST_BREAK && stype != SLEEPY_AST_CONTINUE &&
+                    stype != SLEEPY_AST_NOP && stype != SLEEPY_AST_ASSIGNMENT) {
+                    
+                    auto_print = true;
+                    uint16_t name_idx = make_constant(compiler, SLEEPY_OBJ_VAL(intern_str(compiler, "println", 7)));
+                    emit_byte(compiler, OP_LOAD_GLOBAL, line);
+                    emit_short(compiler, name_idx, line);
+                }
+            }
+
             compile_node(compiler, node->as.block.statements[i]);
-            if (node->as.block.statements[i]->type != SLEEPY_AST_ENV_BRIDGE &&
-                node->as.block.statements[i]->type != SLEEPY_AST_IF &&
-                node->as.block.statements[i]->type != SLEEPY_AST_WHILE &&
-                node->as.block.statements[i]->type != SLEEPY_AST_FOR &&
-                node->as.block.statements[i]->type != SLEEPY_AST_FOREACH &&
-                node->as.block.statements[i]->type != SLEEPY_AST_ASSERT &&
-                node->as.block.statements[i]->type != SLEEPY_AST_TRY_CATCH &&
-                node->as.block.statements[i]->type != SLEEPY_AST_RETURN &&
-                node->as.block.statements[i]->type != SLEEPY_AST_THROW &&
-                node->as.block.statements[i]->type != SLEEPY_AST_YIELD &&
-                node->as.block.statements[i]->type != SLEEPY_AST_BREAK &&
-                node->as.block.statements[i]->type != SLEEPY_AST_CONTINUE &&
-                node->as.block.statements[i]->type != SLEEPY_AST_NOP) {
-                emit_byte(compiler, OP_POP, line);
+
+            if (stype != SLEEPY_AST_ENV_BRIDGE && stype != SLEEPY_AST_IF &&
+                stype != SLEEPY_AST_WHILE && stype != SLEEPY_AST_FOR &&
+                stype != SLEEPY_AST_FOREACH && stype != SLEEPY_AST_ASSERT &&
+                stype != SLEEPY_AST_TRY_CATCH && stype != SLEEPY_AST_RETURN &&
+                stype != SLEEPY_AST_THROW && stype != SLEEPY_AST_YIELD &&
+                stype != SLEEPY_AST_BREAK && stype != SLEEPY_AST_CONTINUE &&
+                stype != SLEEPY_AST_NOP) {
+                if (auto_print) {
+                    emit_byte(compiler, OP_CALL, line);
+                    emit_byte(compiler, 1, line);
+                    emit_byte(compiler, OP_POP, line);
+                } else {
+                    emit_byte(compiler, OP_POP, line);
+                }
             }
         }
         break;

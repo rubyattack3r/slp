@@ -79,6 +79,8 @@ struct SleepyVM {
 
     SleepyTryHandler try_handlers[SLEEPY_MAX_HANDLERS];
     int try_handler_count;
+
+    bool repl_mode;
 };
 
 typedef enum {

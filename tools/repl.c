@@ -31,6 +31,39 @@ static void repl_write(void *ud, const char *msg) {
     printf("%s", msg);
 }
 
+// Simple balance checker for multi-line REPL
+static int check_balance(const char *str, int *braces, int *parens, int *brackets) {
+    int in_string = 0;
+    int in_comment = 0;
+    for (int i = 0; str[i]; i++) {
+        if (in_comment) {
+            if (str[i] == '\n') in_comment = 0;
+            continue;
+        }
+        if (in_string) {
+            if (str[i] == '\\' && str[i+1] != '\0') i++; // skip escaped
+            else if (str[i] == '"') in_string = 0;
+            continue;
+        }
+        if (str[i] == '"') {
+            in_string = 1;
+            continue;
+        }
+        if (str[i] == '/' && str[i+1] == '/') {
+            in_comment = 1;
+            i++;
+            continue;
+        }
+        if (str[i] == '{') (*braces)++;
+        else if (str[i] == '}') (*braces)--;
+        else if (str[i] == '(') (*parens)++;
+        else if (str[i] == ')') (*parens)--;
+        else if (str[i] == '[') (*brackets)++;
+        else if (str[i] == ']') (*brackets)--;
+    }
+    return in_string;
+}
+
 int main(int argc, char **argv) {
     SleepyVM *vm = sleepy_vm_new(&allocator);
     sleepy_vm_set_error_fn(vm, repl_error, NULL);
@@ -58,35 +91,77 @@ int main(int argc, char **argv) {
 
     printf("SleepyVM REPL v0.1\n");
     printf("Type 'exit' to quit.\n");
+    
+    bestlineHistoryLoad(".sleepy_history");
+
+    char *buffer = NULL;
+    size_t buf_len = 0;
 
     while (1) {
-        char *line = bestline("> ");
-        if (!line) break;
+        int braces = 0, parens = 0, brackets = 0;
+        int in_string = 0;
+        if (buffer) {
+            in_string = check_balance(buffer, &braces, &parens, &brackets);
+        }
 
-        if (strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0) {
+        const char *prompt = (braces > 0 || parens > 0 || brackets > 0 || in_string) ? "... " : "> ";
+        char *line = bestline(prompt);
+        if (!line) {
+            if (buffer) { free(buffer); buffer = NULL; buf_len = 0; printf("\n"); continue; }
+            break; // EOF
+        }
+
+        if (!buffer && (strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0)) {
             free(line);
             break;
         }
 
         if (line[0] != '\0') {
-            bestlineHistoryAdd(line);
-            size_t len = strlen(line);
-            char *source = (char *)malloc(len + 2);
-            strcpy(source, line);
-            if (source[len - 1] != ';' && source[len - 1] != '}') {
-                source[len] = ';';
-                source[len + 1] = '\0';
+            size_t line_len = strlen(line);
+            if (!buffer) {
+                buffer = malloc(line_len + 2);
+                strcpy(buffer, line);
+                buf_len = line_len;
+            } else {
+                buffer = realloc(buffer, buf_len + line_len + 2);
+                buffer[buf_len] = '\n';
+                strcpy(buffer + buf_len + 1, line);
+                buf_len += line_len + 1;
             }
-            
-            SleepyResult r = sleepy_vm_interpret(vm, source);
-            // Print top of stack if ok, but interpret pops the whole stack.
-            // But wait, interpret runs a full script, the result is lost. That's fine.
-            (void)r;
-            free(source);
+        } else if (buffer) {
+            buffer[buf_len] = '\n';
+            buffer[buf_len+1] = '\0';
+            buf_len++;
         }
         free(line);
+
+        if (buffer) {
+            braces = 0; parens = 0; brackets = 0;
+            in_string = check_balance(buffer, &braces, &parens, &brackets);
+            if (braces <= 0 && parens <= 0 && brackets <= 0 && !in_string) {
+                bestlineHistoryAdd(buffer);
+                bestlineHistorySave(".sleepy_history");
+
+                // Quick heuristic: add semicolon if not present for simple lines
+                if (buffer[buf_len - 1] != ';' && buffer[buf_len - 1] != '}') {
+                    buffer = realloc(buffer, buf_len + 2);
+                    buffer[buf_len] = ';';
+                    buffer[buf_len + 1] = '\0';
+                }
+                
+                // If it's a simple expression, we could evaluate and print it, 
+                // but interpreting directly is safest.
+                vm->repl_mode = true;
+                sleepy_vm_interpret(vm, buffer);
+                vm->repl_mode = false;
+                free(buffer);
+                buffer = NULL;
+                buf_len = 0;
+            }
+        }
     }
 
+    if (buffer) free(buffer);
     sleepy_vm_free(vm);
     return 0;
 }
