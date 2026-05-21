@@ -171,9 +171,6 @@ static void compile_node(SleepyCompiler *compiler, SleepyASTNode *node) {
                     stype != SLEEPY_AST_NOP && stype != SLEEPY_AST_ASSIGNMENT) {
                     
                     auto_print = true;
-                    uint16_t name_idx = make_constant(compiler, SLEEPY_OBJ_VAL(intern_str(compiler, "println", 7)));
-                    emit_byte(compiler, OP_LOAD_GLOBAL, line);
-                    emit_short(compiler, name_idx, line);
                 }
             }
 
@@ -187,9 +184,7 @@ static void compile_node(SleepyCompiler *compiler, SleepyASTNode *node) {
                 stype != SLEEPY_AST_BREAK && stype != SLEEPY_AST_CONTINUE &&
                 stype != SLEEPY_AST_NOP) {
                 if (auto_print) {
-                    emit_byte(compiler, OP_CALL, line);
-                    emit_byte(compiler, 1, line);
-                    emit_byte(compiler, OP_POP, line);
+                    emit_byte(compiler, OP_RETURN, line);
                 } else {
                     emit_byte(compiler, OP_POP, line);
                 }

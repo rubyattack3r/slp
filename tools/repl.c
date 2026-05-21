@@ -97,6 +97,63 @@ static void completion(const char *buf, int pos, bestlineCompletions *lc) {
     }
 }
 
+static void pry_print_value(SleepyValue value) {
+    if (SLEEPY_IS_NULL(value)) {
+        printf("\x1b[36m$null\x1b[0m");
+    } else if (SLEEPY_IS_BOOL(value)) {
+        printf("\x1b[36m%s\x1b[0m", SLEEPY_AS_BOOL(value) ? "true" : "false");
+    } else if (SLEEPY_IS_NUM(value)) {
+        printf("\x1b[33m%g\x1b[0m", SLEEPY_AS_NUM(value));
+    } else if (SLEEPY_IS_OBJ(value)) {
+        switch (SLEEPY_OBJ_TYPE(value)) {
+            case SLEEPY_OBJ_STRING:
+                printf("\x1b[32m\"%s\"\x1b[0m", SLEEPY_AS_STRING(value)->chars);
+                break;
+            case SLEEPY_OBJ_LONG:
+                printf("\x1b[33m%lldL\x1b[0m", SLEEPY_AS_LONG(value)->value);
+                break;
+            case SLEEPY_OBJ_FUNCTION:
+                printf("\x1b[35m[function]\x1b[0m");
+                break;
+            case SLEEPY_OBJ_CLOSURE:
+                printf("\x1b[35m[closure]\x1b[0m");
+                break;
+            case SLEEPY_OBJ_NATIVE:
+                printf("\x1b[35m[native]\x1b[0m");
+                break;
+            case SLEEPY_OBJ_ARRAY: {
+                SleepyObjArray *arr = SLEEPY_AS_ARRAY(value);
+                printf("\x1b[1m@(\x1b[0m");
+                for (int i = 0; i < arr->count; i++) {
+                    pry_print_value(arr->elements[i]);
+                    if (i < arr->count - 1) printf("\x1b[1m, \x1b[0m");
+                }
+                printf("\x1b[1m)\x1b[0m");
+                break;
+            }
+            case SLEEPY_OBJ_HASH: {
+                SleepyObjHash *hash = SLEEPY_AS_HASH(value);
+                printf("\x1b[1m%%(\x1b[0m");
+                bool first = true;
+                for (int i = 0; i < hash->capacity; i++) {
+                    if (!SLEEPY_IS_NULL(hash->entries[i].key) && !SLEEPY_IS_TRUE(hash->entries[i].value)) {
+                        if (!first) printf("\x1b[1m, \x1b[0m");
+                        pry_print_value(hash->entries[i].key);
+                        printf(" \x1b[1m=>\x1b[0m ");
+                        pry_print_value(hash->entries[i].value);
+                        first = false;
+                    }
+                }
+                printf("\x1b[1m)\x1b[0m");
+                break;
+            }
+            default:
+                printf("\x1b[35m[object]\x1b[0m");
+                break;
+        }
+    }
+}
+
 int main(int argc, char **argv) {
     SleepyVM *vm = sleepy_vm_new(&allocator);
     sleepy_vm_set_error_fn(vm, repl_error, NULL);
@@ -186,8 +243,26 @@ int main(int argc, char **argv) {
                 // If it's a simple expression, we could evaluate and print it, 
                 // but interpreting directly is safest.
                 vm->repl_mode = true;
-                sleepy_vm_interpret(vm, buffer);
+                SleepyResult r = sleepy_vm_interpret(vm, buffer);
                 vm->repl_mode = false;
+                
+                if (r == SLEEPY_OK) {
+                    // Try to grab the return value from the stack (if any)
+                    // The compiler pushes the return value of OP_RETURN to the top
+                    // Wait, our compiler returns the result of the top-level block.
+                    // If it was an expression, sleepy_vm_interpret will pop it because sleepy_vm_run pops.
+                    // Actually, let's peek the stack before we do anything.
+                    // Wait, sleepy_vm_interpret pops the frame, but the result is on the stack *if* the compiler emitted OP_RETURN.
+                    // In our compiler, repl_mode emits OP_RETURN which pushes the result.
+                    SleepyValue result = sleepy_vm_pop(vm);
+                    
+                    // We also don't want to print $null for variable assignments or block statements that return $null.
+                    // But in a REPL it's standard to print $null too if it's the result, unless it's a completely empty line.
+                    printf("\x1b[90m=>\x1b[0m ");
+                    pry_print_value(result);
+                    printf("\n");
+                }
+                
                 free(buffer);
                 buffer = NULL;
                 buf_len = 0;
