@@ -51,3 +51,5 @@ Makefile.bak
 *.gcno
 *.gcov
 coverage.info
+sleepy
+bench_sleepy
