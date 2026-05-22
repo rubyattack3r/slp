@@ -1,37 +1,37 @@
-# Sleepy C Implementation
+# SLP C Implementation
 
-This project is a C implementation of a parser, lexer, and eventually a VM for the `sleepy` programming language.
+This project is a C implementation of a parser, lexer, and eventually a VM for the `slp` programming language.
 
 ## Design Constraints
 
 1. **Zero Dependencies**: The core C implementation has absolutely zero external dependencies. It does not even rely on standard `malloc` and `free` implicitly. 
-2. **Allocator Approach**: All memory allocations are driven through a custom `SleepyAllocator` which involves a `userdata` pointer and a user-provided reallocation function. This allocator must be passed around everywhere.
-3. **Architecture Reference**: The implementation structure takes inspiration from the [Wren](https://github.com/wren-lang/wren) C implementation, while the language semantics and lexer/parser logic are based on the [Sleepy](https://github.com/sleepy-lang/sleepy) reference implementation.
+2. **Allocator Approach**: All memory allocations are driven through a custom `SlpAllocator` which involves a `userdata` pointer and a user-provided reallocation function. This allocator must be passed around everywhere.
+3. **Architecture Reference**: The implementation structure takes inspiration from the [Wren](https://github.com/wren-lang/wren) C implementation, while the language semantics and lexer/parser logic are based on the [SLP](https://github.com/sleepy-lang/sleepy) reference implementation.
 
 ## Project Structure
 
-- `include/sleepy/`: Public headers for incorporating the Sleepy C API into your applications.
+- `include/`: Public headers for incorporating the SLP C API into your applications.
 - `src/`: Core implementation files for the Lexer, Parser, and VM.
-- `tests/`: Unit tests written in C++ using `doctest.h` to verify the C implementation against the standard test fixtures from the `sleepy` reference implementation.
+- `tests/`: Unit tests written in C++ using `doctest.h` to verify the C implementation against the standard test fixtures from the reference implementation.
 
 ## Building and Usage
 
 You can build the interactive REPL (Read-Eval-Print Loop) binary using `make`:
 
 ```bash
-make sleepy
+make slp
 ```
 
-This will produce a `sleepy` binary in the `bin/` directory. You can start the interactive REPL:
+This will produce a `slp` binary in the `bin/` directory. You can start the interactive REPL:
 
 ```bash
-./bin/sleepy
+./bin/slp
 ```
 
 Or execute a script directly:
 
 ```bash
-./bin/sleepy path/to/script.sl
+./bin/slp path/to/script.sl
 ```
 
 ---
@@ -119,7 +119,7 @@ Once loaded, type any registered alias with arguments (e.g., `sc_config arg1 arg
 
 ### 4. Generic Extension Library (`libaggressor`)
 
-Located in `extensions/aggressor/`, `libaggressor` decouples the core Sleepy C engine from Cobalt Strike domain logic. It supports multi-VM co-existence by storing all FFI hooks, overrides, and dispatch state inside a heap-allocated struct associated with each VM instance via FFI slots, completely avoiding single-VM static globals.
+Located in `extensions/aggressor/`, `libaggressor` decouples the core SLP C engine from Cobalt Strike domain logic. It supports multi-VM co-existence by storing all FFI hooks, overrides, and dispatch state inside a heap-allocated struct associated with each VM instance via FFI slots, completely avoiding single-VM static globals.
 
 ---
 
@@ -130,12 +130,9 @@ The bundled bash script `bundle.sh` automates the build and bundling workflow:
 ./bundle.sh ./examples/cna-projects ./dist/packaged_tools.cna
 ```
 
-A complete GitHub Actions workflow is located at `.github/workflows/bundle-workflow.yml`. It:
-1. Provisions the development environment using **Nix** (`nix develop`).
-2. Bundles the projects via `bundle.sh`.
-3. Compiles the dry-run validator and asserts the bundle is correct.
-4. Executes the doctest-based unit test suite.
-5. Archives and uploads the validated production-ready CNA bundle.
+Two complete GitHub Actions workflows are located under `.github/workflows/`:
+1. **C Core CI (`c-core-ci.yml`)**: Automates building all targets, running the full C++ unit test suite, and executing performance benchmarks natively on both **Ubuntu** and **macOS** runners.
+2. **Create Release Suite (`release.yml`)**: Provisions the development environment using **Nix**, compiles native production binaries for Linux and macOS Universal, cross-compiles Windows binaries via MinGW, packages them into structured platform archives, and drafts a GitHub Release with the compiled assets.
 
 ---
 

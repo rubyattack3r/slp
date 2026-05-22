@@ -1,9 +1,9 @@
 // No main here, use test_main.cpp
 #include "doctest.h"
 extern "C" {
-#include "sleepy_ast.h"
-#include "sleepy_parser.h"
-#include "sleepy_utils.h"
+#include "slp_ast.h"
+#include "slp_parser.h"
+#include "slp_utils.h"
 }
 #include <string.h>
 
@@ -19,18 +19,18 @@ static void *test_reallocate(void *ptr, size_t new_size, void *user_data) {
 
 // Helper to parse and then format back to verify identity or normalization
 static char *roundtrip(const char *source) {
-  SleepyAllocator allocator;
+  SlpAllocator allocator;
   allocator.reallocate = test_reallocate;
   allocator.user_data = NULL;
 
-  SleepyParser parser;
-  sleepy_parser_init(&parser, source, &allocator);
+  SlpParser parser;
+  slp_parser_init(&parser, source, &allocator);
 
-  SleepyASTNode *node = sleepy_parser_parse(&parser);
+  SlpASTNode *node = slp_parser_parse(&parser);
   if (!node)
     return NULL;
 
-  char *formatted = sleepy_ast_format(node, &allocator);
+  char *formatted = slp_ast_format(node, &allocator);
   if (formatted) {
     printf("DEBUG: roundtrip output: [%s]\n", formatted);
   } else {
@@ -114,7 +114,7 @@ TEST_CASE("AST Serialization: Control Flow") {
 TEST_CASE("AST Serialization: Function Calls") {
   SUBCASE("Simple call") {
     char *res = roundtrip("foo(1, 2, 3)");
-    // Our parser currently maps numbers to SLEEPY_AST_NUMBER which unparser
+    // Our parser currently maps numbers to SLP_AST_NUMBER which unparser
     // doesn't handle yet
     CHECK(!!(strstr(res, "foo(1, 2, 3)") != NULL));
   }

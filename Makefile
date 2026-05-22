@@ -14,14 +14,14 @@ AGGRESSOR_OBJ = extensions/aggressor/aggressor.o
 TEST_SRC = $(wildcard tests/*.cpp)
 TEST_OBJ = $(TEST_SRC:.cpp=.o)
 
-.PHONY: all clean test bench amalgamate sleepy cna_bundler cna_validator aggressor tools sleepy_lib libaggressor test_runner bench_sleepy sleepy_fmt sleepyd
+.PHONY: all clean test bench amalgamate slp cna_bundler cna_validator aggressor tools slp_lib libaggressor test_runner bench_slp slp_fmt slpd
 
-all: sleepy_lib libaggressor sleepy tools amalgamate
+all: slp_lib libaggressor slp tools amalgamate
 
 # Static library of the C implementation
-sleepy_lib: bin/libsleepy.a
+slp_lib: bin/libslp.a
 
-bin/libsleepy.a: $(OBJ)
+bin/libslp.a: $(OBJ)
 	@mkdir -p bin
 	ar rcs $@ $(OBJ)
 
@@ -49,20 +49,20 @@ tests/%.o: tests/%.cpp
 test: test_runner
 	./bin/test_runner
 
-bench: bench_sleepy
-	./bin/bench_sleepy
+bench: bench_slp
+	./bin/bench_slp
 
-bench_sleepy: bin/bench_sleepy
+bench_slp: bin/bench_slp
 
-bin/bench_sleepy: $(OBJ) tools/bench_sleepy.c
+bin/bench_slp: $(OBJ) tools/bench_slp.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -O2 -o $@ tools/bench_sleepy.c $(OBJ)
+	$(CC) $(CFLAGS) -O2 -o $@ tools/bench_slp.c $(OBJ)
 
-sleepy: bin/sleepy
+slp: bin/slp
 
-bin/sleepy: $(OBJ) tools/repl.c deps/bestline/bestline.c
+bin/slp: $(OBJ) tools/slp.c deps/bestline/bestline.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o $@ tools/repl.c deps/bestline/bestline.c $(OBJ)
+	$(CC) $(CFLAGS) -o $@ tools/slp.c deps/bestline/bestline.c $(OBJ)
 
 cna_bundler: bin/cna_bundler
 
@@ -85,23 +85,23 @@ bin/aggressor: $(OBJ) $(AGGRESSOR_OBJ) tools/aggressor.c deps/bestline/bestline.
 	@mkdir -p bin
 	$(CC) $(CFLAGS) -o $@ tools/aggressor.c deps/bestline/bestline.c $(OBJ) $(AGGRESSOR_OBJ)
 
-sleepy_fmt: bin/sleepy_fmt
+slp_fmt: bin/slp_fmt
 
-bin/sleepy_fmt: $(OBJ) tools/sleepy_fmt.c
+bin/slp_fmt: $(OBJ) tools/slp_fmt.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o $@ tools/sleepy_fmt.c $(OBJ)
+	$(CC) $(CFLAGS) -o $@ tools/slp_fmt.c $(OBJ)
 
-sleepyd: bin/sleepyd
+slpd: bin/slpd
 
-bin/sleepyd: $(OBJ) tools/sleepyd.c
+bin/slpd: $(OBJ) tools/slpd.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o $@ tools/sleepyd.c $(OBJ)
+	$(CC) $(CFLAGS) -o $@ tools/slpd.c $(OBJ)
 
-tools: cna_bundler cna_validator aggressor sleepy_fmt sleepyd bench_sleepy
+tools: cna_bundler cna_validator aggressor slp_fmt slpd bench_slp
 
 clean:
 	rm -rf src/*.o tests/*.o extensions/**/*.o extensions/*.o deps/**/*.o
-	rm -rf bin/ dist/ *.cna .aggressor_history .sleepy_history test_no_rewrite
+	rm -rf bin/ dist/ *.cna .aggressor_history .slp_history test_no_rewrite
 
 amalgamate:
 	./scripts/amalgamate.sh

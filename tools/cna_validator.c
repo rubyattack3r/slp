@@ -6,12 +6,12 @@
  * resource verification, etc.).
  */
 
-#include "sleepy_common.h"
-#include "sleepy_core.h"
-#include "sleepy_vm.h"
-#include "sleepy_compiler.h"
-#include "sleepy_disasm.h"
-#include "sleepy_parser.h"
+#include "slp_common.h"
+#include "slp_core.h"
+#include "slp_vm.h"
+#include "slp_compiler.h"
+#include "slp_disasm.h"
+#include "slp_parser.h"
 #include "aggressor.h"
 
 #include <stdio.h>
@@ -48,7 +48,7 @@ typedef struct {
 /* Global registry for aliases */
 typedef struct {
     char name[128];
-    SleepyObjClosure *closure;
+    SlpObjClosure *closure;
 } AliasRecord;
 
 #define MAX_ALIASES 512
@@ -90,7 +90,7 @@ static void *repl_alloc(void *ptr, size_t size, void *ud) {
     return realloc(ptr, size);
 }
 
-static SleepyAllocator allocator = {repl_alloc, NULL};
+static SlpAllocator allocator = {repl_alloc, NULL};
 
 static void repl_error(void *ud, int line, const char *msg) {
     ValidatorState *state = (ValidatorState *)ud;
@@ -120,29 +120,29 @@ static void repl_write(void *ud, const char *msg) {
 
 static ValidatorState *global_validator_state = NULL;
 
-static SleepyValue val_println(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue val_println(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm;
     if (global_validator_state && global_validator_state->format != FORMAT_TEXT) {
-        return SLEEPY_NULL_VAL;
+        return SLP_NULL_VAL;
     }
     if (argc > 0) {
-        if (SLEEPY_IS_NUM(args[0]))
-            printf("%g\n", SLEEPY_AS_NUM(args[0]));
-        else if (SLEEPY_IS_BOOL(args[0]))
-            printf("%s\n", SLEEPY_AS_BOOL(args[0]) ? "true" : "false");
-        else if (SLEEPY_IS_NULL(args[0]))
+        if (SLP_IS_NUM(args[0]))
+            printf("%g\n", SLP_AS_NUM(args[0]));
+        else if (SLP_IS_BOOL(args[0]))
+            printf("%s\n", SLP_AS_BOOL(args[0]) ? "true" : "false");
+        else if (SLP_IS_NULL(args[0]))
             printf("$null\n");
-        else if (SLEEPY_IS_OBJ(args[0])) {
-            SleepyObj *obj = SLEEPY_AS_OBJ(args[0]);
-            if (obj->type == SLEEPY_OBJ_STRING)
-                printf("%s\n", ((SleepyObjString*)obj)->chars);
+        else if (SLP_IS_OBJ(args[0])) {
+            SlpObj *obj = SLP_AS_OBJ(args[0]);
+            if (obj->type == SLP_OBJ_STRING)
+                printf("%s\n", ((SlpObjString*)obj)->chars);
             else
                 printf("[object]\n");
         }
     } else {
         printf("\n");
     }
-    return SLEEPY_NULL_VAL;
+    return SLP_NULL_VAL;
 }
 
 static void print_escaped_json(const char *str) {
@@ -269,8 +269,8 @@ static int alias_count = 0;
  * Bridge Handler: alias
  * ----------------------------------------------------------------------- */
 
-static void alias_handler(SleepyVM *vm, const char *keyword, const char *name,
-                           const char *str, SleepyObjClosure *closure,
+static void alias_handler(SlpVM *vm, const char *keyword, const char *name,
+                           const char *str, SlpObjClosure *closure,
                            void *ud) {
     (void)keyword; (void)str; (void)ud;
     if (!name) return;
@@ -286,26 +286,26 @@ static void alias_handler(SleepyVM *vm, const char *keyword, const char *name,
     /* Store globally as __alias_NAME for REPL/dry-run invocation */
     char global_name[256];
     snprintf(global_name, sizeof(global_name), "__alias_%s", name);
-    SleepyObjString *gname = sleepy_vm_copy_string(vm, global_name, strlen(global_name));
-    sleepy_obj_hash_set(vm->allocator, vm->globals, SLEEPY_OBJ_VAL(gname), SLEEPY_OBJ_VAL(closure));
+    SlpObjString *gname = slp_vm_copy_string(vm, global_name, strlen(global_name));
+    slp_obj_hash_set(vm->allocator, vm->globals, SLP_OBJ_VAL(gname), SLP_OBJ_VAL(closure));
 }
 
 /* -----------------------------------------------------------------------
  * Validator-Specific Overrides
  *
- * These are AggressorNativeFn (with user_data), not SleepyNativeFn.
+ * These are AggressorNativeFn (with user_data), not SlpNativeFn.
  * ----------------------------------------------------------------------- */
 
-static SleepyValue val_barch(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_barch(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     (void)args; (void)argc; (void)ud;
-    return SLEEPY_OBJ_VAL(sleepy_vm_copy_string(vm, "x64", 3));
+    return SLP_OBJ_VAL(slp_vm_copy_string(vm, "x64", 3));
 }
 
-static SleepyValue val_script_resource(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_script_resource(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     ValidatorState *state = (ValidatorState *)ud;
-    if (argc < 1 || !(SLEEPY_IS_OBJ(args[0]) && SLEEPY_OBJ_TYPE(args[0]) == SLEEPY_OBJ_STRING))
-        return SLEEPY_NULL_VAL;
-    SleepyObjString *str = SLEEPY_AS_STRING(args[0]);
+    if (argc < 1 || !(SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING))
+        return SLP_NULL_VAL;
+    SlpObjString *str = SLP_AS_STRING(args[0]);
     if (strchr(str->chars, '$') == NULL) {
         if (access(str->chars, F_OK) != 0) {
             char msg[512];
@@ -316,75 +316,75 @@ static SleepyValue val_script_resource(SleepyVM *vm, SleepyValue *args, int argc
             }
         }
     }
-    return SLEEPY_OBJ_VAL(sleepy_vm_copy_string(vm, str->chars, str->length));
+    return SLP_OBJ_VAL(slp_vm_copy_string(vm, str->chars, str->length));
 }
 
-static SleepyValue val_bof_pack(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_bof_pack(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     (void)args; (void)argc; (void)ud;
-    return SLEEPY_OBJ_VAL(sleepy_vm_copy_string(vm, "packed_bof_args", 15));
+    return SLP_OBJ_VAL(slp_vm_copy_string(vm, "packed_bof_args", 15));
 }
 
-static SleepyValue val_btask(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_btask(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     ValidatorState *state = (ValidatorState *)ud;
     (void)vm;
-    if (state->format == FORMAT_TEXT && argc >= 2 && SLEEPY_IS_OBJ(args[1]) && SLEEPY_OBJ_TYPE(args[1]) == SLEEPY_OBJ_STRING)
-        printf("[Task] %s\n", SLEEPY_AS_STRING(args[1])->chars);
-    return SLEEPY_NULL_VAL;
+    if (state->format == FORMAT_TEXT && argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
+        printf("[Task] %s\n", SLP_AS_STRING(args[1])->chars);
+    return SLP_NULL_VAL;
 }
 
-static SleepyValue val_blog(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_blog(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     ValidatorState *state = (ValidatorState *)ud;
     (void)vm;
-    if (state->format == FORMAT_TEXT && argc >= 2 && SLEEPY_IS_OBJ(args[1]) && SLEEPY_OBJ_TYPE(args[1]) == SLEEPY_OBJ_STRING)
-        printf("[Log] %s\n", SLEEPY_AS_STRING(args[1])->chars);
-    return SLEEPY_NULL_VAL;
+    if (state->format == FORMAT_TEXT && argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
+        printf("[Log] %s\n", SLP_AS_STRING(args[1])->chars);
+    return SLP_NULL_VAL;
 }
 
-static SleepyValue val_berror(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_berror(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     ValidatorState *state = (ValidatorState *)ud;
     (void)vm;
-    if (state->format == FORMAT_TEXT && argc >= 2 && SLEEPY_IS_OBJ(args[1]) && SLEEPY_OBJ_TYPE(args[1]) == SLEEPY_OBJ_STRING)
-        printf("\x1b[31m[Error]\x1b[0m %s\n", SLEEPY_AS_STRING(args[1])->chars);
-    return SLEEPY_NULL_VAL;
+    if (state->format == FORMAT_TEXT && argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
+        printf("\x1b[31m[Error]\x1b[0m %s\n", SLP_AS_STRING(args[1])->chars);
+    return SLP_NULL_VAL;
 }
 
-static SleepyValue val_beacon_command_register(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_beacon_command_register(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     ValidatorState *state = (ValidatorState *)ud;
     (void)vm;
-    if (state->format == FORMAT_TEXT && argc >= 1 && SLEEPY_IS_OBJ(args[0]) && SLEEPY_OBJ_TYPE(args[0]) == SLEEPY_OBJ_STRING)
-        printf("[+] Registered command: %s\n", SLEEPY_AS_STRING(args[0])->chars);
-    return SLEEPY_NULL_VAL;
+    if (state->format == FORMAT_TEXT && argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING)
+        printf("[+] Registered command: %s\n", SLP_AS_STRING(args[0])->chars);
+    return SLP_NULL_VAL;
 }
 
-static SleepyValue val_beacon_inline_execute(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_beacon_inline_execute(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     ValidatorState *state = (ValidatorState *)ud;
     (void)vm;
     if (state->format == FORMAT_TEXT) {
         printf("[+] \x1b[36mbeacon_inline_execute\x1b[0m triggered!\n");
-        if (argc >= 2 && SLEEPY_IS_OBJ(args[1]) && SLEEPY_OBJ_TYPE(args[1]) == SLEEPY_OBJ_STRING)
-            printf("    -> BOF data length: %d bytes\n", SLEEPY_AS_STRING(args[1])->length);
-        if (argc >= 3 && SLEEPY_IS_OBJ(args[2]) && SLEEPY_OBJ_TYPE(args[2]) == SLEEPY_OBJ_STRING)
-            printf("    -> Entrypoint: %s\n", SLEEPY_AS_STRING(args[2])->chars);
-        if (argc >= 4 && SLEEPY_IS_OBJ(args[3]) && SLEEPY_OBJ_TYPE(args[3]) == SLEEPY_OBJ_STRING)
-            printf("    -> Args length: %d bytes\n", SLEEPY_AS_STRING(args[3])->length);
+        if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
+            printf("    -> BOF data length: %d bytes\n", SLP_AS_STRING(args[1])->length);
+        if (argc >= 3 && SLP_IS_OBJ(args[2]) && SLP_OBJ_TYPE(args[2]) == SLP_OBJ_STRING)
+            printf("    -> Entrypoint: %s\n", SLP_AS_STRING(args[2])->chars);
+        if (argc >= 4 && SLP_IS_OBJ(args[3]) && SLP_OBJ_TYPE(args[3]) == SLP_OBJ_STRING)
+            printf("    -> Args length: %d bytes\n", SLP_AS_STRING(args[3])->length);
     }
-    return SLEEPY_NULL_VAL;
+    return SLP_NULL_VAL;
 }
 
-static SleepyValue val_beacon_command_detail(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_beacon_command_detail(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     (void)args; (void)argc; (void)ud;
-    return SLEEPY_OBJ_VAL(sleepy_vm_copy_string(vm, "Mock details", 12));
+    return SLP_OBJ_VAL(slp_vm_copy_string(vm, "Mock details", 12));
 }
 
-static SleepyValue val_openf(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_openf(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     ValidatorState *state = (ValidatorState *)ud;
     (void)vm;
-    if (argc < 1 || !(SLEEPY_IS_OBJ(args[0]) && SLEEPY_OBJ_TYPE(args[0]) == SLEEPY_OBJ_STRING))
-        return SLEEPY_NUM_VAL(-1);
-    const char *path = SLEEPY_AS_STRING(args[0])->chars;
+    if (argc < 1 || !(SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING))
+        return SLP_NUM_VAL(-1);
+    const char *path = SLP_AS_STRING(args[0])->chars;
 
     if (strchr(path, '$') != NULL) {
-        return SLEEPY_NUM_VAL(-1);
+        return SLP_NUM_VAL(-1);
     }
 
     if (access(path, F_OK) != 0) {
@@ -394,7 +394,7 @@ static SleepyValue val_openf(SleepyVM *vm, SleepyValue *args, int argc, void *ud
         if (state->format == FORMAT_TEXT) {
             fprintf(stderr, "\x1b[31m[!] Validation Error: openf failed, file not found: %s\x1b[0m\n", path);
         }
-        return SLEEPY_NUM_VAL(-1);
+        return SLP_NUM_VAL(-1);
     }
 
     for (int i = 0; i < MAX_OPEN_FILES; i++) {
@@ -402,23 +402,23 @@ static SleepyValue val_openf(SleepyVM *vm, SleepyValue *args, int argc, void *ud
             FILE *f = fopen(path, "rb");
             if (f) {
                 state->open_files[i] = f;
-                return SLEEPY_NUM_VAL(i);
+                return SLP_NUM_VAL(i);
             }
             break;
         }
     }
-    return SLEEPY_NUM_VAL(-1);
+    return SLP_NUM_VAL(-1);
 }
 
-static SleepyValue val_readb(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_readb(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     ValidatorState *state = (ValidatorState *)ud;
-    if (argc < 2 || !SLEEPY_IS_NUM(args[0]) || !SLEEPY_IS_NUM(args[1]))
-        return SLEEPY_NULL_VAL;
-    int handle = (int)SLEEPY_AS_NUM(args[0]);
-    int size = (int)SLEEPY_AS_NUM(args[1]);
+    if (argc < 2 || !SLP_IS_NUM(args[0]) || !SLP_IS_NUM(args[1]))
+        return SLP_NULL_VAL;
+    int handle = (int)SLP_AS_NUM(args[0]);
+    int size = (int)SLP_AS_NUM(args[1]);
 
     if (handle < 0 || handle >= MAX_OPEN_FILES || !state->open_files[handle])
-        return SLEEPY_NULL_VAL;
+        return SLP_NULL_VAL;
 
     FILE *f = state->open_files[handle];
     if (size == -1) {
@@ -429,37 +429,37 @@ static SleepyValue val_readb(SleepyVM *vm, SleepyValue *args, int argc, void *ud
         size = (int)(end - current);
     }
 
-    if (size <= 0) return SLEEPY_NULL_VAL;
+    if (size <= 0) return SLP_NULL_VAL;
 
     char *buf = malloc(size);
     size_t read_bytes = fread(buf, 1, size, f);
-    SleepyObjString *str = sleepy_vm_copy_string(vm, buf, (uint32_t)read_bytes);
+    SlpObjString *str = slp_vm_copy_string(vm, buf, (uint32_t)read_bytes);
     free(buf);
-    return SLEEPY_OBJ_VAL(str);
+    return SLP_OBJ_VAL(str);
 }
 
-static SleepyValue val_closef(SleepyVM *vm, SleepyValue *args, int argc, void *ud) {
+static SlpValue val_closef(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     ValidatorState *state = (ValidatorState *)ud;
     (void)vm;
-    if (argc < 1 || !SLEEPY_IS_NUM(args[0])) return SLEEPY_NULL_VAL;
-    int handle = (int)SLEEPY_AS_NUM(args[0]);
+    if (argc < 1 || !SLP_IS_NUM(args[0])) return SLP_NULL_VAL;
+    int handle = (int)SLP_AS_NUM(args[0]);
     if (handle >= 0 && handle < MAX_OPEN_FILES && state->open_files[handle]) {
         fclose(state->open_files[handle]);
         state->open_files[handle] = NULL;
     }
-    return SLEEPY_NULL_VAL;
+    return SLP_NULL_VAL;
 }
 
 /* -----------------------------------------------------------------------
  * Fallback: catch-all for any unregistered function
  * ----------------------------------------------------------------------- */
 
-static SleepyValue validator_fallback(SleepyVM *vm, const char *func_name,
-                                       SleepyValue *args, int argc,
+static SlpValue validator_fallback(SlpVM *vm, const char *func_name,
+                                       SlpValue *args, int argc,
                                        void *user_data) {
     (void)vm; (void)args; (void)argc; (void)user_data;
     /* Silent stub — return NULL for any unknown function */
-    return SLEEPY_NULL_VAL;
+    return SLP_NULL_VAL;
 }
 
 
@@ -509,9 +509,9 @@ int main(int argc, char **argv) {
     global_validator_state = &state;
 
     /* Create VM */
-    SleepyVM *vm = sleepy_vm_new(&allocator);
-    sleepy_vm_set_error_fn(vm, repl_error, &state);
-    sleepy_vm_set_write_fn(vm, repl_write, &state);
+    SlpVM *vm = slp_vm_new(&allocator);
+    slp_vm_set_error_fn(vm, repl_error, &state);
+    slp_vm_set_write_fn(vm, repl_write, &state);
 
     /* Initialize libaggressor with our fallback and state */
     AggressorConfig cfg = {
@@ -521,7 +521,7 @@ int main(int argc, char **argv) {
     AggressorState *ag_state = aggressor_init(vm, &cfg);
 
     /* Override println so it isn't reset by aggressor_init */
-    sleepy_vm_register_native(vm, "println", val_println);
+    slp_vm_register_native(vm, "println", val_println);
 
     /* Override functions with validation-aware implementations */
     aggressor_set(ag_state, "barch",                    val_barch);
@@ -559,7 +559,7 @@ int main(int argc, char **argv) {
             print_junit_report(&state, 0, 0, NULL);
         }
         free(ag_state);
-        sleepy_vm_free(vm);
+        slp_vm_free(vm);
         return 1;
     }
     fseek(f, 0, SEEK_END);
@@ -570,9 +570,9 @@ int main(int argc, char **argv) {
     source[read_cnt] = '\0';
     fclose(f);
 
-    SleepyResult r = sleepy_vm_interpret(vm, source);
+    SlpResult r = slp_vm_interpret(vm, source);
     free(source);
-    if (r != SLEEPY_OK) {
+    if (r != SLP_OK) {
         add_validation_error(&state, "global_load_failed", NULL, "Failed evaluating the script during initial load.");
         if (state.format == FORMAT_TEXT) {
             fprintf(stderr, "[!] Validation failed: error evaluating the script.\n");
@@ -583,7 +583,7 @@ int main(int argc, char **argv) {
             print_junit_report(&state, 0, 0, NULL);
         }
         free(ag_state);
-        sleepy_vm_free(vm);
+        slp_vm_free(vm);
         return 1;
     }
 
@@ -597,8 +597,8 @@ int main(int argc, char **argv) {
         state.current_alias[sizeof(state.current_alias) - 1] = '\0';
         char cmd[1024];
         snprintf(cmd, sizeof(cmd), "__alias_%s('1', 'dummy')", alias_registry[i].name);
-        SleepyResult ar = sleepy_vm_interpret(vm, cmd);
-        if (ar != SLEEPY_OK) {
+        SlpResult ar = slp_vm_interpret(vm, cmd);
+        if (ar != SLP_OK) {
             char msg[512];
             snprintf(msg, sizeof(msg), "Execution crashed in alias '%s'", alias_registry[i].name);
             add_validation_error(&state, "execution_crash", NULL, msg);
@@ -625,6 +625,6 @@ int main(int argc, char **argv) {
     }
 
     free(ag_state);
-    sleepy_vm_free(vm);
+    slp_vm_free(vm);
     return state.validation_failed ? 1 : 0;
 }

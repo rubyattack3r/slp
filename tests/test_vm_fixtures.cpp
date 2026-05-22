@@ -1,8 +1,8 @@
 #include "doctest.h"
 extern "C" {
-#include "sleepy_common.h"
-#include "sleepy_core.h"
-#include "sleepy_vm.h"
+#include "slp_common.h"
+#include "slp_core.h"
+#include "slp_vm.h"
 }
 #include <dirent.h>
 #include <stdio.h>
@@ -15,11 +15,11 @@ static void *vmfix_alloc(void *ptr, size_t size, void *ud) {
     if (size == 0) { free(ptr); return NULL; }
     return realloc(ptr, size);
 }
-static SleepyAllocator vmfix_allocator = {vmfix_alloc, NULL};
+static SlpAllocator vmfix_allocator = {vmfix_alloc, NULL};
 
 struct VMFixtureResult {
     char name[128];
-    SleepyResult result;
+    SlpResult result;
     bool found;
 };
 
@@ -35,7 +35,7 @@ static void fix_err_handler(void *ud, int line, const char *msg) {
 static VMFixtureResult run_vm_fixture(const char *filepath, const char *name) {
     VMFixtureResult r;
     snprintf(r.name, sizeof(r.name), "%s", name);
-    r.result = SLEEPY_RUNTIME_ERROR;
+    r.result = SLP_RUNTIME_ERROR;
     r.found = false;
 
     FILE *f = fopen(filepath, "rb");
@@ -50,10 +50,10 @@ static VMFixtureResult run_vm_fixture(const char *filepath, const char *name) {
     source[nread] = '\0';
     fclose(f);
 
-    SleepyVM *vm = sleepy_vm_new(&vmfix_allocator);
-    sleepy_vm_set_error_fn(vm, fix_err_handler, NULL);
-    r.result = sleepy_vm_interpret(vm, source);
-    sleepy_vm_free(vm);
+    SlpVM *vm = slp_vm_new(&vmfix_allocator);
+    slp_vm_set_error_fn(vm, fix_err_handler, NULL);
+    r.result = slp_vm_interpret(vm, source);
+    slp_vm_free(vm);
     free(source);
     return r;
 }
@@ -82,7 +82,7 @@ TEST_CASE("VM fixtures: all scripts pass self-checking asserts") {
     int passed = 0, failed = 0;
     printf("\n=== VM Fixture Test Results ===\n");
     for (int i = 0; i < count; i++) {
-        if (results[i].result == SLEEPY_OK) {
+        if (results[i].result == SLP_OK) {
             printf("  [PASS] %s\n", results[i].name);
             passed++;
         } else {
@@ -93,7 +93,7 @@ TEST_CASE("VM fixtures: all scripts pass self-checking asserts") {
     printf("Total: %d | Passed: %d | Failed: %d\n", count, passed, failed);
 
     for (int i = 0; i < count; i++) {
-        if (results[i].result != SLEEPY_OK) {
+        if (results[i].result != SLP_OK) {
             FAIL(results[i].name, " did not pass its asserts");
         }
     }

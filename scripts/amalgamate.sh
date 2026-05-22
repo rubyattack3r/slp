@@ -1,5 +1,5 @@
 #!/bin/bash
-# amalgamate.sh - Creates a single sleepy.h and sleepy.c from the project sources
+# amalgamate.sh - Creates a single slp.h and slp.c from the project sources
 
 set -e
 
@@ -15,17 +15,17 @@ if [ "$1" == "--single" ]; then
     echo "Single header mode enabled."
 fi
 
-HEADER_OUT="$OUT_DIR/sleepy.h"
-SOURCE_OUT="$OUT_DIR/sleepy.c"
+HEADER_OUT="$OUT_DIR/slp.h"
+SOURCE_OUT="$OUT_DIR/slp.c"
 
 echo "Amalgamating headers into $HEADER_OUT..."
 cat << 'EOF' > "$HEADER_OUT"
 /*
- * Sleepy Amalgamated Header
+ * SLP Amalgamated Header
  * Generated automatically.
  */
-#ifndef SLEEPY_H
-#define SLEEPY_H
+#ifndef SLP_H
+#define SLP_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -34,10 +34,10 @@ cat << 'EOF' > "$HEADER_OUT"
 EOF
 
 # Add headers in dependency order. Filter out #include "..."
-for f in ../include/sleepy_common.h ../include/sleepy_core.h ../include/sleepy_utils.h ../include/sleepy_lexer.h ../include/sleepy_parser.h ../include/sleepy_ast.h ../include/sleepy_opcodes.h ../include/sleepy_value.h ../include/sleepy_chunk.h ../include/sleepy_gc.h ../include/sleepy_vm.h ../include/sleepy_compiler.h ../include/sleepy_disasm.h ../include/sleepy_bytecode.h; do
+for f in ../include/slp_common.h ../include/slp_core.h ../include/slp_utils.h ../include/slp_lexer.h ../include/slp_parser.h ../include/slp_ast.h ../include/slp_opcodes.h ../include/slp_value.h ../include/slp_chunk.h ../include/slp_gc.h ../include/slp_vm.h ../include/slp_compiler.h ../include/slp_disasm.h ../include/slp_bytecode.h; do
     echo "/* --- File: $f --- */" >> "$HEADER_OUT"
     # Remove #pragma once, #ifndef/#define guards at the top, and #include "..." local headers
-    cat "$f" | egrep -v '^\s*#include\s+"' | egrep -v '^\s*#ifndef\s+SLEEPY_.*_H\s*$' | egrep -v '^\s*#define\s+SLEEPY_.*_H\s*$' | python3 -c "import sys, re; lines = sys.stdin.readlines();
+    cat "$f" | egrep -v '^\s*#include\s+"' | egrep -v '^\s*#ifndef\s+SLP_.*_H\s*$' | egrep -v '^\s*#define\s+SLP_.*_H\s*$' | python3 -c "import sys, re; lines = sys.stdin.readlines();
 while lines and lines[-1].strip() == '': lines.pop();
 if lines and re.match(r'^\s*#endif.*', lines[-1]): lines.pop();
 sys.stdout.write(''.join(lines))" >> "$HEADER_OUT"
@@ -45,22 +45,22 @@ sys.stdout.write(''.join(lines))" >> "$HEADER_OUT"
 done
 
 if [ "$SINGLE_HEADER" -eq 0 ]; then
-    echo "#endif // SLEEPY_H" >> "$HEADER_OUT"
+    echo "#endif // SLP_H" >> "$HEADER_OUT"
 fi
 
 if [ "$SINGLE_HEADER" -eq 0 ]; then
     echo "Amalgamating sources into $SOURCE_OUT..."
     cat << 'EOF' > "$SOURCE_OUT"
 /*
- * Sleepy Amalgamated Source
+ * SLP Amalgamated Source
  * Generated automatically.
  */
-#include "sleepy.h"
+#include "slp.h"
 
 EOF
 fi
 
-for f in ../src/sleepy_utils.c ../src/sleepy_lexer.c ../src/sleepy_parser.c ../src/sleepy_ast.c ../src/sleepy_value.c ../src/sleepy_chunk.c ../src/sleepy_gc.c ../src/sleepy_vm.c ../src/sleepy_compiler.c ../src/sleepy_disasm.c ../src/sleepy_bytecode.c; do
+for f in ../src/slp_utils.c ../src/slp_lexer.c ../src/slp_parser.c ../src/slp_ast.c ../src/slp_value.c ../src/slp_chunk.c ../src/slp_gc.c ../src/slp_vm.c ../src/slp_compiler.c ../src/slp_disasm.c ../src/slp_bytecode.c; do
     if [ "$SINGLE_HEADER" -eq 1 ]; then
         echo "/* --- File: $f --- */" >> "$HEADER_OUT"
         cat "$f" | egrep -v '^\s*#include\s+"' >> "$HEADER_OUT"
@@ -74,7 +74,7 @@ done
 
 if [ "$SINGLE_HEADER" -eq 1 ]; then
     # Close the inclusion guard if we combined everything
-    echo "#endif // SLEEPY_H" >> "$HEADER_OUT"
+    echo "#endif // SLP_H" >> "$HEADER_OUT"
     echo "Single header amalgamation complete: $HEADER_OUT"
 else
     echo "Amalgamation complete."

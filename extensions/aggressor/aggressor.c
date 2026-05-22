@@ -1,11 +1,11 @@
 /*
- * aggressor.c - Aggressor Script Extension for the Sleepy VM
+ * aggressor.c - Aggressor Script Extension for the Slp VM
  *
  * This file implements the generic dispatch framework. It registers all
  * known Aggressor functions into the VM and routes calls through either:
  *   1. An explicit per-function override (set via aggressor_set())
  *   2. A consumer-provided fallback handler
- *   3. A built-in safe default stub (returns SLEEPY_NULL_VAL)
+ *   3. A built-in safe default stub (returns SLP_NULL_VAL)
  *
  * Pure language utilities (iff, strlen, substr, etc.) have real
  * implementations here and don't go through the dispatch table.
@@ -41,11 +41,11 @@ struct AggressorState {
     int trampoline_count;
 };
 
-static void *aggressor_alloc(SleepyVM *vm, size_t size) {
+static void *aggressor_alloc(SlpVM *vm, size_t size) {
     return vm->allocator->reallocate(NULL, size, vm->allocator->user_data);
 }
 
-static void aggressor_free(SleepyVM *vm, void *ptr) {
+static void aggressor_free(SlpVM *vm, void *ptr) {
     vm->allocator->reallocate(ptr, 0, vm->allocator->user_data);
 }
 
@@ -59,16 +59,16 @@ static AggressorNativeFn find_override(AggressorState *state, const char *name) 
 }
 
 /* Default fallback: returns NULL silently */
-static SleepyValue default_fallback(SleepyVM *vm, const char *func_name,
-                                     SleepyValue *args, int argc,
+static SlpValue default_fallback(SlpVM *vm, const char *func_name,
+                                     SlpValue *args, int argc,
                                      void *user_data) {
     (void)vm; (void)func_name; (void)args; (void)argc; (void)user_data;
-    return SLEEPY_NULL_VAL;
+    return SLP_NULL_VAL;
 }
 
 /* Dispatch logic shared by all trampolines */
-static SleepyValue dispatch(SleepyVM *vm, AggressorState *state, const char *name,
-                             SleepyValue *args, int argc) {
+static SlpValue dispatch(SlpVM *vm, AggressorState *state, const char *name,
+                             SlpValue *args, int argc) {
     /* Check for explicit override first */
     AggressorNativeFn override = find_override(state, name);
     if (override) {
@@ -86,10 +86,10 @@ static SleepyValue dispatch(SleepyVM *vm, AggressorState *state, const char *nam
  * and looks up its name from the trampoline table.
  */
 #define TRAMPOLINE(n) \
-    static SleepyValue trampoline_##n(SleepyVM *vm, SleepyValue *args, int argc) { \
-        int64_t addr = sleepy_vm_ffi_get_long(vm, 255); \
+    static SlpValue trampoline_##n(SlpVM *vm, SlpValue *args, int argc) { \
+        int64_t addr = slp_vm_ffi_get_long(vm, 255); \
         AggressorState *state = (AggressorState *)(uintptr_t)addr; \
-        if (!state) return SLEEPY_NULL_VAL; \
+        if (!state) return SLP_NULL_VAL; \
         return dispatch(vm, state, state->trampoline_names[n].name, args, argc); \
     }
 
@@ -127,7 +127,7 @@ TRAMPOLINE(116) TRAMPOLINE(117) TRAMPOLINE(118) TRAMPOLINE(119)
 TRAMPOLINE(120) TRAMPOLINE(121) TRAMPOLINE(122) TRAMPOLINE(123)
 TRAMPOLINE(124) TRAMPOLINE(125) TRAMPOLINE(126) TRAMPOLINE(127)
 
-static SleepyNativeFn trampoline_table[AGGRESSOR_MAX_TRAMPOLINES] = {
+static SlpNativeFn trampoline_table[AGGRESSOR_MAX_TRAMPOLINES] = {
     trampoline_0,   trampoline_1,   trampoline_2,   trampoline_3,
     trampoline_4,   trampoline_5,   trampoline_6,   trampoline_7,
     trampoline_8,   trampoline_9,   trampoline_10,  trampoline_11,
@@ -166,7 +166,7 @@ static SleepyNativeFn trampoline_table[AGGRESSOR_MAX_TRAMPOLINES] = {
  * Register a dispatched function. Allocates a trampoline slot and wires
  * it into the VM's native table.
  */
-static void register_dispatched(SleepyVM *vm, AggressorState *state, const char *name) {
+static void register_dispatched(SlpVM *vm, AggressorState *state, const char *name) {
     if (state->trampoline_count >= AGGRESSOR_MAX_TRAMPOLINES) {
         fprintf(stderr, "[aggressor] ERROR: trampoline table full (%d max)\n",
                 AGGRESSOR_MAX_TRAMPOLINES);
@@ -175,127 +175,127 @@ static void register_dispatched(SleepyVM *vm, AggressorState *state, const char 
     int slot = state->trampoline_count++;
     strncpy(state->trampoline_names[slot].name, name, 63);
     state->trampoline_names[slot].name[63] = '\0';
-    sleepy_vm_register_native(vm, name, trampoline_table[slot]);
+    slp_vm_register_native(vm, name, trampoline_table[slot]);
 }
 
 /* -----------------------------------------------------------------------
  * Built-in Utility Implementations
  * ----------------------------------------------------------------------- */
 
-static SleepyValue builtin_iff(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue builtin_iff(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm;
-    if (argc < 3) return SLEEPY_NULL_VAL;
-    if (SLEEPY_IS_TRUE(args[0])) return args[1];
+    if (argc < 3) return SLP_NULL_VAL;
+    if (SLP_IS_TRUE(args[0])) return args[1];
     return args[2];
 }
 
-static SleepyValue builtin_istrue(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue builtin_istrue(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm;
-    if (argc < 1) return SLEEPY_NUM_VAL(0);
-    return SLEEPY_NUM_VAL(SLEEPY_IS_TRUE(args[0]) ? 1 : 0);
+    if (argc < 1) return SLP_NUM_VAL(0);
+    return SLP_NUM_VAL(SLP_IS_TRUE(args[0]) ? 1 : 0);
 }
 
-static SleepyValue builtin_strlen(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue builtin_strlen(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm;
-    if (argc < 1) return SLEEPY_NUM_VAL(0);
-    if (!SLEEPY_IS_OBJ(args[0]) || SLEEPY_OBJ_TYPE(args[0]) != SLEEPY_OBJ_STRING)
-        return SLEEPY_NUM_VAL(0);
-    return SLEEPY_NUM_VAL((double)SLEEPY_AS_STRING(args[0])->length);
+    if (argc < 1) return SLP_NUM_VAL(0);
+    if (!SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_STRING)
+        return SLP_NUM_VAL(0);
+    return SLP_NUM_VAL((double)SLP_AS_STRING(args[0])->length);
 }
 
-static SleepyValue builtin_int(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue builtin_int(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm;
-    if (argc < 1) return SLEEPY_NUM_VAL(0);
-    if (!SLEEPY_IS_NUM(args[0])) return SLEEPY_NUM_VAL(0);
-    return SLEEPY_NUM_VAL((double)(int)SLEEPY_AS_NUM(args[0]));
+    if (argc < 1) return SLP_NUM_VAL(0);
+    if (!SLP_IS_NUM(args[0])) return SLP_NUM_VAL(0);
+    return SLP_NUM_VAL((double)(int)SLP_AS_NUM(args[0]));
 }
 
-static SleepyValue builtin_size(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue builtin_size(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm;
-    if (argc < 1) return SLEEPY_NUM_VAL(0);
+    if (argc < 1) return SLP_NUM_VAL(0);
     /* If it's an array, return the actual length */
-    if (SLEEPY_IS_OBJ(args[0]) && SLEEPY_OBJ_TYPE(args[0]) == SLEEPY_OBJ_ARRAY) {
-        return SLEEPY_NUM_VAL((double)SLEEPY_AS_ARRAY(args[0])->count);
+    if (SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_ARRAY) {
+        return SLP_NUM_VAL((double)SLP_AS_ARRAY(args[0])->count);
     }
     /* If it's a string, return string length */
-    if (SLEEPY_IS_OBJ(args[0]) && SLEEPY_OBJ_TYPE(args[0]) == SLEEPY_OBJ_STRING) {
-        return SLEEPY_NUM_VAL((double)SLEEPY_AS_STRING(args[0])->length);
+    if (SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
+        return SLP_NUM_VAL((double)SLP_AS_STRING(args[0])->length);
     }
-    return SLEEPY_NUM_VAL(0);
+    return SLP_NUM_VAL(0);
 }
 
-static SleepyValue builtin_local(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue builtin_local(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm; (void)args; (void)argc;
-    return SLEEPY_NULL_VAL;
+    return SLP_NULL_VAL;
 }
 
-static SleepyValue builtin_print(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue builtin_print(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm; (void)args; (void)argc;
-    return SLEEPY_NULL_VAL;
+    return SLP_NULL_VAL;
 }
 
-static SleepyValue builtin_println(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue builtin_println(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm;
-    if (argc >= 1 && SLEEPY_IS_OBJ(args[0]) && SLEEPY_OBJ_TYPE(args[0]) == SLEEPY_OBJ_STRING) {
-        printf("%s\n", SLEEPY_AS_STRING(args[0])->chars);
+    if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
+        printf("%s\n", SLP_AS_STRING(args[0])->chars);
     }
-    return SLEEPY_NULL_VAL;
+    return SLP_NULL_VAL;
 }
 
-static SleepyValue builtin_ticks(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue builtin_ticks(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm; (void)args; (void)argc;
-    return SLEEPY_NUM_VAL(0);
+    return SLP_NUM_VAL(0);
 }
 
-static SleepyValue builtin_substr(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue builtin_substr(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm;
-    if (argc < 2) return SLEEPY_NULL_VAL;
-    if (!SLEEPY_IS_OBJ(args[0]) || SLEEPY_OBJ_TYPE(args[0]) != SLEEPY_OBJ_STRING)
-        return SLEEPY_NULL_VAL;
-    SleepyObjString *str = SLEEPY_AS_STRING(args[0]);
-    int start = SLEEPY_IS_NUM(args[1]) ? (int)SLEEPY_AS_NUM(args[1]) : 0;
-    int end = (argc >= 3 && SLEEPY_IS_NUM(args[2]))
-              ? (int)SLEEPY_AS_NUM(args[2])
+    if (argc < 2) return SLP_NULL_VAL;
+    if (!SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_STRING)
+        return SLP_NULL_VAL;
+    SlpObjString *str = SLP_AS_STRING(args[0]);
+    int start = SLP_IS_NUM(args[1]) ? (int)SLP_AS_NUM(args[1]) : 0;
+    int end = (argc >= 3 && SLP_IS_NUM(args[2]))
+              ? (int)SLP_AS_NUM(args[2])
               : (int)str->length;
     if (start < 0) start = 0;
     if (end > (int)str->length) end = (int)str->length;
-    if (start >= end) return SLEEPY_OBJ_VAL(sleepy_vm_copy_string(vm, "", 0));
-    return SLEEPY_OBJ_VAL(sleepy_vm_copy_string(vm, str->chars + start, end - start));
+    if (start >= end) return SLP_OBJ_VAL(slp_vm_copy_string(vm, "", 0));
+    return SLP_OBJ_VAL(slp_vm_copy_string(vm, str->chars + start, end - start));
 }
 
-static SleepyValue builtin_lc(SleepyVM *vm, SleepyValue *args, int argc) {
-    if (argc < 1 || !SLEEPY_IS_OBJ(args[0]) || SLEEPY_OBJ_TYPE(args[0]) != SLEEPY_OBJ_STRING)
-        return SLEEPY_NULL_VAL;
-    SleepyObjString *str = SLEEPY_AS_STRING(args[0]);
+static SlpValue builtin_lc(SlpVM *vm, SlpValue *args, int argc) {
+    if (argc < 1 || !SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_STRING)
+        return SLP_NULL_VAL;
+    SlpObjString *str = SLP_AS_STRING(args[0]);
     char *buf = aggressor_alloc(vm, str->length + 1);
     for (uint32_t i = 0; i < str->length; i++) buf[i] = (char)tolower(str->chars[i]);
     buf[str->length] = '\0';
-    SleepyObjString *result = sleepy_vm_copy_string(vm, buf, str->length);
+    SlpObjString *result = slp_vm_copy_string(vm, buf, str->length);
     aggressor_free(vm, buf);
-    return SLEEPY_OBJ_VAL(result);
+    return SLP_OBJ_VAL(result);
 }
 
-static SleepyValue builtin_uc(SleepyVM *vm, SleepyValue *args, int argc) {
-    if (argc < 1 || !SLEEPY_IS_OBJ(args[0]) || SLEEPY_OBJ_TYPE(args[0]) != SLEEPY_OBJ_STRING)
-        return SLEEPY_NULL_VAL;
-    SleepyObjString *str = SLEEPY_AS_STRING(args[0]);
+static SlpValue builtin_uc(SlpVM *vm, SlpValue *args, int argc) {
+    if (argc < 1 || !SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_STRING)
+        return SLP_NULL_VAL;
+    SlpObjString *str = SLP_AS_STRING(args[0]);
     char *buf = aggressor_alloc(vm, str->length + 1);
     for (uint32_t i = 0; i < str->length; i++) buf[i] = (char)toupper(str->chars[i]);
     buf[str->length] = '\0';
-    SleepyObjString *result = sleepy_vm_copy_string(vm, buf, str->length);
+    SlpObjString *result = slp_vm_copy_string(vm, buf, str->length);
     aggressor_free(vm, buf);
-    return SLEEPY_OBJ_VAL(result);
+    return SLP_OBJ_VAL(result);
 }
 
-static SleepyValue builtin_replace(SleepyVM *vm, SleepyValue *args, int argc) {
+static SlpValue builtin_replace(SlpVM *vm, SlpValue *args, int argc) {
     /* replace(string, old, new) */
-    if (argc < 3) return SLEEPY_NULL_VAL;
-    if (!SLEEPY_IS_OBJ(args[0]) || SLEEPY_OBJ_TYPE(args[0]) != SLEEPY_OBJ_STRING) return args[0];
-    if (!SLEEPY_IS_OBJ(args[1]) || SLEEPY_OBJ_TYPE(args[1]) != SLEEPY_OBJ_STRING) return args[0];
-    if (!SLEEPY_IS_OBJ(args[2]) || SLEEPY_OBJ_TYPE(args[2]) != SLEEPY_OBJ_STRING) return args[0];
-    SleepyObjString *src = SLEEPY_AS_STRING(args[0]);
-    SleepyObjString *old = SLEEPY_AS_STRING(args[1]);
-    SleepyObjString *rep = SLEEPY_AS_STRING(args[2]);
+    if (argc < 3) return SLP_NULL_VAL;
+    if (!SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_STRING) return args[0];
+    if (!SLP_IS_OBJ(args[1]) || SLP_OBJ_TYPE(args[1]) != SLP_OBJ_STRING) return args[0];
+    if (!SLP_IS_OBJ(args[2]) || SLP_OBJ_TYPE(args[2]) != SLP_OBJ_STRING) return args[0];
+    SlpObjString *src = SLP_AS_STRING(args[0]);
+    SlpObjString *old = SLP_AS_STRING(args[1]);
+    SlpObjString *rep = SLP_AS_STRING(args[2]);
     if (old->length == 0) return args[0];
 
     /* Count occurrences to allocate result */
@@ -321,30 +321,30 @@ static SleepyValue builtin_replace(SleepyVM *vm, SleepyValue *args, int argc) {
     dst += src->chars + src->length - prev;
     *dst = '\0';
 
-    SleepyObjString *result = sleepy_vm_copy_string(vm, buf, new_len);
+    SlpObjString *result = slp_vm_copy_string(vm, buf, new_len);
     aggressor_free(vm, buf);
-    return SLEEPY_OBJ_VAL(result);
+    return SLP_OBJ_VAL(result);
 }
 
 /* -----------------------------------------------------------------------
  * Registration: Built-in utilities
  * ----------------------------------------------------------------------- */
 
-static void register_builtins(SleepyVM *vm) {
-    sleepy_vm_register_native(vm, "iff",     builtin_iff);
-    sleepy_vm_register_native(vm, "-istrue", builtin_istrue);
-    sleepy_vm_register_native(vm, "strlen",  builtin_strlen);
-    sleepy_vm_register_native(vm, "int",     builtin_int);
-    sleepy_vm_register_native(vm, "size",    builtin_size);
-    sleepy_vm_register_native(vm, "local",   builtin_local);
-    sleepy_vm_register_native(vm, "print",   builtin_print);
-    sleepy_vm_register_native(vm, "println", builtin_println);
-    sleepy_vm_register_native(vm, "ticks",   builtin_ticks);
-    sleepy_vm_register_native(vm, "substr",  builtin_substr);
-    sleepy_vm_register_native(vm, "lc",      builtin_lc);
-    sleepy_vm_register_native(vm, "uc",      builtin_uc);
-    sleepy_vm_register_native(vm, "replace", builtin_replace);
-    sleepy_vm_register_native(vm, "strrep",  builtin_replace);  /* alias */
+static void register_builtins(SlpVM *vm) {
+    slp_vm_register_native(vm, "iff",     builtin_iff);
+    slp_vm_register_native(vm, "-istrue", builtin_istrue);
+    slp_vm_register_native(vm, "strlen",  builtin_strlen);
+    slp_vm_register_native(vm, "int",     builtin_int);
+    slp_vm_register_native(vm, "size",    builtin_size);
+    slp_vm_register_native(vm, "local",   builtin_local);
+    slp_vm_register_native(vm, "print",   builtin_print);
+    slp_vm_register_native(vm, "println", builtin_println);
+    slp_vm_register_native(vm, "ticks",   builtin_ticks);
+    slp_vm_register_native(vm, "substr",  builtin_substr);
+    slp_vm_register_native(vm, "lc",      builtin_lc);
+    slp_vm_register_native(vm, "uc",      builtin_uc);
+    slp_vm_register_native(vm, "replace", builtin_replace);
+    slp_vm_register_native(vm, "strrep",  builtin_replace);  /* alias */
 }
 
 /* -----------------------------------------------------------------------
@@ -413,7 +413,7 @@ static const char *dispatched_functions[] = {
  * Public API
  * ----------------------------------------------------------------------- */
 
-AggressorState *aggressor_init(SleepyVM *vm, AggressorConfig *config) {
+AggressorState *aggressor_init(SlpVM *vm, AggressorConfig *config) {
     AggressorState *state = malloc(sizeof(AggressorState));
     memset(state, 0, sizeof(AggressorState));
 
@@ -423,7 +423,7 @@ AggressorState *aggressor_init(SleepyVM *vm, AggressorConfig *config) {
     }
 
     /* Store state pointer in VM FFI slot 255 */
-    sleepy_vm_ffi_set_long(vm, 255, (int64_t)(uintptr_t)state);
+    slp_vm_ffi_set_long(vm, 255, (int64_t)(uintptr_t)state);
 
     /* Register built-in pure utilities (always the same) */
     register_builtins(vm);
@@ -456,8 +456,8 @@ void aggressor_set(AggressorState *state, const char *name, AggressorNativeFn fn
     }
 }
 
-AggressorConfig *aggressor_get_config(SleepyVM *vm) {
-    int64_t addr = sleepy_vm_ffi_get_long(vm, 255);
+AggressorConfig *aggressor_get_config(SlpVM *vm) {
+    int64_t addr = slp_vm_ffi_get_long(vm, 255);
     AggressorState *state = (AggressorState *)(uintptr_t)addr;
     if (!state) return NULL;
     return &state->config;
@@ -467,9 +467,9 @@ AggressorConfig *aggressor_get_config(SleepyVM *vm) {
  * Category-Based Overrides
  * ----------------------------------------------------------------------- */
 
-void aggressor_set_beacon_ops(SleepyVM *vm, AggressorBeaconOps *ops) {
+void aggressor_set_beacon_ops(SlpVM *vm, AggressorBeaconOps *ops) {
     if (!ops) return;
-    int64_t addr = sleepy_vm_ffi_get_long(vm, 255);
+    int64_t addr = slp_vm_ffi_get_long(vm, 255);
     AggressorState *state = (AggressorState *)(uintptr_t)addr;
     if (!state) return;
 
@@ -492,9 +492,9 @@ void aggressor_set_beacon_ops(SleepyVM *vm, AggressorBeaconOps *ops) {
     if (ops->bpowershell)           aggressor_set(state, "bpowershell",           ops->bpowershell);
 }
 
-void aggressor_set_file_ops(SleepyVM *vm, AggressorFileOps *ops) {
+void aggressor_set_file_ops(SlpVM *vm, AggressorFileOps *ops) {
     if (!ops) return;
-    int64_t addr = sleepy_vm_ffi_get_long(vm, 255);
+    int64_t addr = slp_vm_ffi_get_long(vm, 255);
     AggressorState *state = (AggressorState *)(uintptr_t)addr;
     if (!state) return;
 
@@ -507,16 +507,16 @@ void aggressor_set_file_ops(SleepyVM *vm, AggressorFileOps *ops) {
     if (ops->script_resource) aggressor_set(state, "script_resource", ops->script_resource);
 }
 
-void aggressor_set_bridge_ops(SleepyVM *vm, AggressorBridgeOps *ops) {
+void aggressor_set_bridge_ops(SlpVM *vm, AggressorBridgeOps *ops) {
     if (!ops) return;
-    int64_t addr = sleepy_vm_ffi_get_long(vm, 255);
+    int64_t addr = slp_vm_ffi_get_long(vm, 255);
     AggressorState *state = (AggressorState *)(uintptr_t)addr;
     if (!state) return;
 
     if (ops->alias_handler)
-        sleepy_vm_register_bridge_type(vm, "alias", ops->alias_handler, state->config.user_data);
+        slp_vm_register_bridge_type(vm, "alias", ops->alias_handler, state->config.user_data);
     if (ops->on_handler)
-        sleepy_vm_register_bridge_type(vm, "on", ops->on_handler, state->config.user_data);
+        slp_vm_register_bridge_type(vm, "on", ops->on_handler, state->config.user_data);
     if (ops->popup_handler)
-        sleepy_vm_register_bridge_type(vm, "popup", ops->popup_handler, state->config.user_data);
+        slp_vm_register_bridge_type(vm, "popup", ops->popup_handler, state->config.user_data);
 }

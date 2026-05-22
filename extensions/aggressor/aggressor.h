@@ -1,8 +1,8 @@
 /*
- * aggressor.h - Aggressor Script Extension for the Sleepy VM
+ * aggressor.h - Aggressor Script Extension for the Slp VM
  *
  * This library provides a generic framework for registering all known
- * Aggressor Script native functions into a Sleepy VM instance. The actual
+ * Aggressor Script native functions into a Slp VM instance. The actual
  * behavior of each function is injected by the consumer through:
  *
  *   1. A fallback handler (called for any function without an explicit override)
@@ -24,7 +24,7 @@
 #ifndef AGGRESSOR_H
 #define AGGRESSOR_H
 
-#include "sleepy_vm.h"
+#include "slp_vm.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -40,21 +40,21 @@ extern "C" {
  * not been explicitly overridden. The `func_name` parameter identifies
  * which function was called, allowing consumers to log, stub, or error.
  */
-typedef SleepyValue (*AggressorFallbackFn)(
-    SleepyVM   *vm,
+typedef SlpValue (*AggressorFallbackFn)(
+    SlpVM   *vm,
     const char *func_name,
-    SleepyValue *args,
+    SlpValue *args,
     int          argc,
     void        *user_data
 );
 
 /*
- * Extended native function signature. Unlike SleepyNativeFn, this carries
+ * Extended native function signature. Unlike SlpNativeFn, this carries
  * the user_data pointer so consumers don't need global state.
  */
-typedef SleepyValue (*AggressorNativeFn)(
-    SleepyVM    *vm,
-    SleepyValue *args,
+typedef SlpValue (*AggressorNativeFn)(
+    SlpVM    *vm,
+    SlpValue *args,
     int          argc,
     void        *user_data
 );
@@ -63,11 +63,11 @@ typedef SleepyValue (*AggressorNativeFn)(
  * Bridge handler for keyword registrations (alias, on, popup, etc.).
  */
 typedef void (*AggressorBridgeFn)(
-    SleepyVM         *vm,
+    SlpVM         *vm,
     const char       *keyword,
     const char       *name,
     const char       *str,
-    SleepyObjClosure *closure,
+    SlpObjClosure *closure,
     void             *user_data
 );
 
@@ -79,7 +79,7 @@ typedef struct {
     /*
      * Called for any registered Aggressor function that hasn't been
      * explicitly overridden. If NULL, a safe default stub is used
-     * (returns SLEEPY_NULL_VAL silently).
+     * (returns SLP_NULL_VAL silently).
      */
     AggressorFallbackFn fallback;
 
@@ -103,9 +103,9 @@ typedef struct AggressorState AggressorState;
  * utilities (iff, strlen, substr, etc.) are registered with real
  * implementations. Everything else routes through the fallback.
  *
- * Call this ONCE after sleepy_vm_new().
+ * Call this ONCE after slp_vm_new().
  */
-AggressorState *aggressor_init(SleepyVM *vm, AggressorConfig *config);
+AggressorState *aggressor_init(SlpVM *vm, AggressorConfig *config);
 
 /*
  * Override a single function after init. The provided function will be
@@ -141,7 +141,7 @@ typedef struct {
     AggressorNativeFn bpowershell;
 } AggressorBeaconOps;
 
-void aggressor_set_beacon_ops(SleepyVM *vm, AggressorBeaconOps *ops);
+void aggressor_set_beacon_ops(SlpVM *vm, AggressorBeaconOps *ops);
 
 /* File I/O functions */
 typedef struct {
@@ -154,7 +154,7 @@ typedef struct {
     AggressorNativeFn script_resource;
 } AggressorFileOps;
 
-void aggressor_set_file_ops(SleepyVM *vm, AggressorFileOps *ops);
+void aggressor_set_file_ops(SlpVM *vm, AggressorFileOps *ops);
 
 /* Bridge handlers (alias, on, popup, etc.) */
 typedef struct {
@@ -163,7 +163,7 @@ typedef struct {
     AggressorBridgeFn popup_handler;
 } AggressorBridgeOps;
 
-void aggressor_set_bridge_ops(SleepyVM *vm, AggressorBridgeOps *ops);
+void aggressor_set_bridge_ops(SlpVM *vm, AggressorBridgeOps *ops);
 
 /* -----------------------------------------------------------------------
  * Utility: Retrieve the config from inside a handler
@@ -173,7 +173,7 @@ void aggressor_set_bridge_ops(SleepyVM *vm, AggressorBridgeOps *ops);
  * Get the AggressorConfig associated with this VM. Returns NULL if
  * aggressor_init() hasn't been called yet.
  */
-AggressorConfig *aggressor_get_config(SleepyVM *vm);
+AggressorConfig *aggressor_get_config(SlpVM *vm);
 
 #ifdef __cplusplus
 }

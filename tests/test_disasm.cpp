@@ -4,48 +4,48 @@
 #include <stdio.h>
 
 extern "C" {
-#include "sleepy_common.h"
-#include "sleepy_core.h"
-#include "sleepy_value.h"
-#include "sleepy_vm.h"
-#include "sleepy_compiler.h"
-#include "sleepy_parser.h"
-#include "sleepy_ast.h"
-#include "sleepy_disasm.h"
+#include "slp_common.h"
+#include "slp_core.h"
+#include "slp_value.h"
+#include "slp_vm.h"
+#include "slp_compiler.h"
+#include "slp_parser.h"
+#include "slp_ast.h"
+#include "slp_disasm.h"
 
 static void *td_alloc(void *ptr, size_t size, void *ud) {
     (void)ud;
     if (size == 0) { free(ptr); return NULL; }
     return realloc(ptr, size);
 }
-static SleepyAllocator td_allocator = {td_alloc, NULL};
+static SlpAllocator td_allocator = {td_alloc, NULL};
 }
 
 TEST_CASE("Disassembler: Opcode names") {
-    CHECK(strcmp(sleepy_opcode_name(OP_PUSH_NULL), "PUSH_NULL") == 0);
-    CHECK(strcmp(sleepy_opcode_name(OP_ADD), "ADD") == 0);
-    CHECK(strcmp(sleepy_opcode_name(OP_RETURN), "RETURN") == 0);
-    CHECK(strcmp(sleepy_opcode_name(OP_HALT), "HALT") == 0);
+    CHECK(strcmp(slp_opcode_name(OP_PUSH_NULL), "PUSH_NULL") == 0);
+    CHECK(strcmp(slp_opcode_name(OP_ADD), "ADD") == 0);
+    CHECK(strcmp(slp_opcode_name(OP_RETURN), "RETURN") == 0);
+    CHECK(strcmp(slp_opcode_name(OP_HALT), "HALT") == 0);
 }
 
 TEST_CASE("Disassembler: Instruction & Chunk Disassembly") {
-    SleepyVM *vm = sleepy_vm_new(&td_allocator);
+    SlpVM *vm = slp_vm_new(&td_allocator);
     REQUIRE(vm != nullptr);
 
     const char *source = "$x = 10; $y = $x + 2;";
-    SleepyParser parser;
-    sleepy_parser_init(&parser, source, &td_allocator);
-    SleepyASTNode *ast = sleepy_parser_parse(&parser);
+    SlpParser parser;
+    slp_parser_init(&parser, source, &td_allocator);
+    SlpASTNode *ast = slp_parser_parse(&parser);
     REQUIRE(ast != nullptr);
 
-    SleepyObjFunction *fn = sleepy_compile(vm, ast, &td_allocator);
+    SlpObjFunction *fn = slp_compile(vm, ast, &td_allocator);
     REQUIRE(fn != nullptr);
 
     // Let's disassemble the chunk to a temporary file
     FILE *tmp = tmpfile();
     REQUIRE(tmp != nullptr);
 
-    sleepy_disasm_chunk(fn->chunk, "test_script", tmp);
+    slp_disasm_chunk(fn->chunk, "test_script", tmp);
 
     // Read the file contents back to verify
     rewind(tmp);
@@ -62,6 +62,6 @@ TEST_CASE("Disassembler: Instruction & Chunk Disassembly") {
     CHECK(strstr(buffer, "ADD") != nullptr);
     CHECK(strstr(buffer, "RETURN") != nullptr);
 
-    sleepy_parser_free_node(ast, &td_allocator);
-    sleepy_vm_free(vm);
+    slp_parser_free_node(ast, &td_allocator);
+    slp_vm_free(vm);
 }

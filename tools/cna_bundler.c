@@ -13,10 +13,10 @@
 #define realpath(N, R) _fullpath((R), (N), PATH_MAX)
 #endif
 
-#include "sleepy_common.h"
-#include "sleepy_lexer.h"
-#include "sleepy_parser.h"
-#include "sleepy_ast.h"
+#include "slp_common.h"
+#include "slp_lexer.h"
+#include "slp_parser.h"
+#include "slp_ast.h"
 
 // Basic memory allocator implementation
 static void* default_realloc(void* ptr, size_t new_size, void* user_data) {
@@ -160,10 +160,10 @@ typedef struct {
     
     RenameConfig* config;
     
-    SleepyAllocator* allocator;
+    SlpAllocator* allocator;
 } SymbolTable;
  
-static void init_symbol_table(SymbolTable* table, SleepyAllocator* allocator, RenameConfig* config) {
+static void init_symbol_table(SymbolTable* table, SlpAllocator* allocator, RenameConfig* config) {
     table->rename_subs = NULL;
     table->rename_subs_count = 0;
     table->rename_globals = NULL;
@@ -181,7 +181,7 @@ static void init_symbol_table(SymbolTable* table, SleepyAllocator* allocator, Re
     table->allocator = allocator;
 }
  
-static void add_string_to_list(char*** list, size_t* count, const char* str, SleepyAllocator* allocator) {
+static void add_string_to_list(char*** list, size_t* count, const char* str, SlpAllocator* allocator) {
     if (!str) return;
     for (size_t i = 0; i < *count; i++) {
         if (strcmp((*list)[i], str) == 0) {
@@ -196,7 +196,7 @@ static void add_string_to_list(char*** list, size_t* count, const char* str, Sle
     (*count)++;
 }
  
-static void free_string_list(char** list, size_t count, SleepyAllocator* allocator) {
+static void free_string_list(char** list, size_t count, SlpAllocator* allocator) {
     for (size_t i = 0; i < count; i++) {
         allocator->reallocate(list[i], 0, allocator->user_data);
     }
@@ -272,24 +272,24 @@ static void extract_local_vars(SymbolTable* symbols, const char* local_str) {
     symbols->allocator->reallocate(copy, 0, symbols->allocator->user_data);
 }
 
-static void scan_pass(SleepyASTNode* node, SymbolTable* symbols, bool is_top_level, const char* project_name) {
+static void scan_pass(SlpASTNode* node, SymbolTable* symbols, bool is_top_level, const char* project_name) {
     if (!node) return;
     
     switch (node->type) {
-        case SLEEPY_AST_SCRIPT:
-        case SLEEPY_AST_BLOCK: {
-            SleepyASTNode** children;
+        case SLP_AST_SCRIPT:
+        case SLP_AST_BLOCK: {
+            SlpASTNode** children;
             size_t count;
-            sleepy_ast_get_children(node, &children, &count, symbols->allocator);
+            slp_ast_get_children(node, &children, &count, symbols->allocator);
             for (size_t i = 0; i < count; i++) {
                 scan_pass(children[i], symbols, is_top_level, project_name);
             }
-            sleepy_ast_free_children(children, symbols->allocator);
+            slp_ast_free_children(children, symbols->allocator);
             break;
         }
-        case SLEEPY_AST_ENV_BRIDGE: {
-            const char* keyword = sleepy_ast_get_env_bridge_keyword(node);
-            const char* id = sleepy_ast_get_env_bridge_id(node);
+        case SLP_AST_ENV_BRIDGE: {
+            const char* keyword = slp_ast_get_env_bridge_keyword(node);
+            const char* id = slp_ast_get_env_bridge_id(node);
             
             if (keyword && id) {
                 if (strcmp(keyword, "sub") == 0) {
@@ -299,25 +299,25 @@ static void scan_pass(SleepyASTNode* node, SymbolTable* symbols, bool is_top_lev
                 }
             }
             
-            SleepyASTNode** children;
+            SlpASTNode** children;
             size_t count;
-            sleepy_ast_get_children(node, &children, &count, symbols->allocator);
+            slp_ast_get_children(node, &children, &count, symbols->allocator);
             for (size_t i = 0; i < count; i++) {
                 scan_pass(children[i], symbols, false, project_name);
             }
-            sleepy_ast_free_children(children, symbols->allocator);
+            slp_ast_free_children(children, symbols->allocator);
             break;
         }
-        case SLEEPY_AST_ASSIGNMENT: {
+        case SLP_AST_ASSIGNMENT: {
             if (is_top_level) {
-                SleepyASTNode** children;
+                SlpASTNode** children;
                 size_t count;
-                sleepy_ast_get_children(node, &children, &count, symbols->allocator);
+                slp_ast_get_children(node, &children, &count, symbols->allocator);
                 if (count >= 1 && children[0]) {
-                    if (children[0]->type == SLEEPY_AST_SCALAR || 
-                        children[0]->type == SLEEPY_AST_ARRAY || 
-                        children[0]->type == SLEEPY_AST_HASHTABLE) {
-                        const char* var_name = sleepy_ast_get_string(children[0]);
+                    if (children[0]->type == SLP_AST_SCALAR || 
+                        children[0]->type == SLP_AST_ARRAY || 
+                        children[0]->type == SLP_AST_HASHTABLE) {
+                        const char* var_name = slp_ast_get_string(children[0]);
                         if (var_name) {
                             add_string_to_list(&symbols->rename_globals, &symbols->rename_globals_count, var_name, symbols->allocator);
                         }
@@ -326,39 +326,39 @@ static void scan_pass(SleepyASTNode* node, SymbolTable* symbols, bool is_top_lev
                 for(size_t i = 0; i < count; i++) {
                     scan_pass(children[i], symbols, false, project_name);
                 }
-                sleepy_ast_free_children(children, symbols->allocator);
+                slp_ast_free_children(children, symbols->allocator);
             } else {
-                SleepyASTNode** children;
+                SlpASTNode** children;
                 size_t count;
-                sleepy_ast_get_children(node, &children, &count, symbols->allocator);
+                slp_ast_get_children(node, &children, &count, symbols->allocator);
                 for (size_t i = 0; i < count; i++) {
                     scan_pass(children[i], symbols, false, project_name);
                 }
-                sleepy_ast_free_children(children, symbols->allocator);
+                slp_ast_free_children(children, symbols->allocator);
             }
             break;
         }
-        case SLEEPY_AST_CALL: {
-            if (node->as.call.target && node->as.call.target->type == SLEEPY_AST_IDENTIFIER) {
-                const char* func_name = sleepy_ast_get_string(node->as.call.target);
+        case SLP_AST_CALL: {
+            if (node->as.call.target && node->as.call.target->type == SLP_AST_IDENTIFIER) {
+                const char* func_name = slp_ast_get_string(node->as.call.target);
                 if (func_name && node->as.call.arg_count > 0 && node->as.call.args[0]) {
-                    SleepyASTNode* arg0 = node->as.call.args[0];
-                    if (arg0->type == SLEEPY_AST_ARG) {
+                    SlpASTNode* arg0 = node->as.call.args[0];
+                    if (arg0->type == SLP_AST_ARG) {
                         arg0 = arg0->as.arg.value;
                     }
-                    if (arg0 && (arg0->type == SLEEPY_AST_STRING || arg0->type == SLEEPY_AST_LITERAL)) {
+                    if (arg0 && (arg0->type == SLP_AST_STRING || arg0->type == SLP_AST_LITERAL)) {
                         if (strcmp(func_name, "beacon_command_register") == 0 ||
                             strcmp(func_name, "beacon_command_register_options") == 0 ||
                             strcmp(func_name, "beacon_command_register_file") == 0 ||
                             strcmp(func_name, "aggressor_command_register") == 0 ||
                             strcmp(func_name, "alias_register") == 0 ||
                             strcmp(func_name, "fireAlias") == 0) {
-                            const char* cmd_name = sleepy_ast_get_string(arg0);
+                            const char* cmd_name = slp_ast_get_string(arg0);
                             if (cmd_name) {
                                 add_alias_to_list(symbols, cmd_name, project_name);
                             }
                         } else if (strcmp(func_name, "local") == 0) {
-                            const char* local_vars = sleepy_ast_get_string(arg0);
+                            const char* local_vars = slp_ast_get_string(arg0);
                             if (local_vars) {
                                 extract_local_vars(symbols, local_vars);
                             }
@@ -376,13 +376,13 @@ static void scan_pass(SleepyASTNode* node, SymbolTable* symbols, bool is_top_lev
             break;
         }
         default: {
-            SleepyASTNode** children;
+            SlpASTNode** children;
             size_t count;
-            sleepy_ast_get_children(node, &children, &count, symbols->allocator);
+            slp_ast_get_children(node, &children, &count, symbols->allocator);
             for (size_t i = 0; i < count; i++) {
                 scan_pass(children[i], symbols, false, project_name);
             }
-            sleepy_ast_free_children(children, symbols->allocator);
+            slp_ast_free_children(children, symbols->allocator);
             break;
         }
     }
@@ -398,8 +398,8 @@ static bool string_in_list(char** list, size_t count, const char* str) {
     return false;
 }
 
-static void apply_prefix(SleepyASTNode* node, const char* prefix, SleepyAllocator* allocator) {
-    const char* old_str = sleepy_ast_get_string(node);
+static void apply_prefix(SlpASTNode* node, const char* prefix, SlpAllocator* allocator) {
+    const char* old_str = slp_ast_get_string(node);
     if (!old_str) return;
     
     bool has_sigil = (old_str[0] == '$' || old_str[0] == '@' || old_str[0] == '%');
@@ -416,7 +416,7 @@ static void apply_prefix(SleepyASTNode* node, const char* prefix, SleepyAllocato
         strcpy(new_str, prefix);
         strcat(new_str, old_str);
     }
-    sleepy_ast_set_string_val(node, new_str, allocator);
+    slp_ast_set_string_val(node, new_str, allocator);
     allocator->reallocate(new_str, 0, allocator->user_data);
 }
 
@@ -431,13 +431,13 @@ static const char* get_renamed_alias(SymbolTable* symbols, const char* project_n
     return alias;
 }
 
-static void rewrite_pass(SleepyASTNode* node, SymbolTable* symbols, const char* prefix, const char* rel_path, const char* project_name, char*** active_locals, size_t* active_locals_count) {
+static void rewrite_pass(SlpASTNode* node, SymbolTable* symbols, const char* prefix, const char* rel_path, const char* project_name, char*** active_locals, size_t* active_locals_count) {
     if (!node) return;
     
     switch (node->type) {
-        case SLEEPY_AST_ENV_BRIDGE: {
-            const char* keyword = sleepy_ast_get_env_bridge_keyword(node);
-            const char* id = sleepy_ast_get_env_bridge_id(node);
+        case SLP_AST_ENV_BRIDGE: {
+            const char* keyword = slp_ast_get_env_bridge_keyword(node);
+            const char* id = slp_ast_get_env_bridge_id(node);
             
             if (keyword && id && strcmp(keyword, "sub") == 0) {
                 if (string_in_list(symbols->rename_subs, symbols->rename_subs_count, id)) {
@@ -445,7 +445,7 @@ static void rewrite_pass(SleepyASTNode* node, SymbolTable* symbols, const char* 
                     char* new_id = symbols->allocator->reallocate(NULL, len, symbols->allocator->user_data);
                     strcpy(new_id, prefix);
                     strcat(new_id, id);
-                    sleepy_ast_set_env_bridge_id(node, new_id, symbols->allocator);
+                    slp_ast_set_env_bridge_id(node, new_id, symbols->allocator);
                     symbols->allocator->reallocate(new_id, 0, symbols->allocator->user_data);
                 }
             } else if (keyword && id && strcmp(keyword, "alias") == 0) {
@@ -453,7 +453,7 @@ static void rewrite_pass(SleepyASTNode* node, SymbolTable* symbols, const char* 
                 if (new_alias && strcmp(new_alias, id) != 0) {
                     char* new_id = symbols->allocator->reallocate(NULL, strlen(new_alias) + 1, symbols->allocator->user_data);
                     strcpy(new_id, new_alias);
-                    sleepy_ast_set_env_bridge_id(node, new_id, symbols->allocator);
+                    slp_ast_set_env_bridge_id(node, new_id, symbols->allocator);
                     symbols->allocator->reallocate(new_id, 0, symbols->allocator->user_data);
                 }
             }
@@ -462,20 +462,20 @@ static void rewrite_pass(SleepyASTNode* node, SymbolTable* symbols, const char* 
             char** current_locals = active_locals ? *active_locals : NULL;
             size_t current_locals_count = old_locals_count;
             
-            SleepyASTNode** children;
+            SlpASTNode** children;
             size_t count;
-            sleepy_ast_get_children(node, &children, &count, symbols->allocator);
+            slp_ast_get_children(node, &children, &count, symbols->allocator);
             
             for (size_t i = 0; i < count; i++) {
-                if (children[i] && children[i]->type == SLEEPY_AST_CALL) {
-                    SleepyASTNode* call = children[i];
-                    if (call->as.call.target && call->as.call.target->type == SLEEPY_AST_IDENTIFIER) {
-                        const char* fn = sleepy_ast_get_string(call->as.call.target);
+                if (children[i] && children[i]->type == SLP_AST_CALL) {
+                    SlpASTNode* call = children[i];
+                    if (call->as.call.target && call->as.call.target->type == SLP_AST_IDENTIFIER) {
+                        const char* fn = slp_ast_get_string(call->as.call.target);
                         if (fn && strcmp(fn, "local") == 0 && call->as.call.arg_count > 0) {
-                            SleepyASTNode* arg0 = call->as.call.args[0];
-                            if (arg0->type == SLEEPY_AST_ARG) arg0 = arg0->as.arg.value;
-                            if (arg0 && (arg0->type == SLEEPY_AST_STRING || arg0->type == SLEEPY_AST_LITERAL)) {
-                                const char* lstr = sleepy_ast_get_string(arg0);
+                            SlpASTNode* arg0 = call->as.call.args[0];
+                            if (arg0->type == SLP_AST_ARG) arg0 = arg0->as.arg.value;
+                            if (arg0 && (arg0->type == SLP_AST_STRING || arg0->type == SLP_AST_LITERAL)) {
+                                const char* lstr = slp_ast_get_string(arg0);
                                 if (lstr) {
                                     char* copy = symbols->allocator->reallocate(NULL, strlen(lstr) + 1, symbols->allocator->user_data);
                                     strcpy(copy, lstr);
@@ -507,12 +507,12 @@ static void rewrite_pass(SleepyASTNode* node, SymbolTable* symbols, const char* 
                 *active_locals_count = old_locals_count;
                 *active_locals = current_locals;
             }
-            sleepy_ast_free_children(children, symbols->allocator);
+            slp_ast_free_children(children, symbols->allocator);
             break;
         }
-        case SLEEPY_AST_CALL: {
-            if (node->as.call.target && node->as.call.target->type == SLEEPY_AST_IDENTIFIER) {
-                const char* func_name = sleepy_ast_get_string(node->as.call.target);
+        case SLP_AST_CALL: {
+            if (node->as.call.target && node->as.call.target->type == SLP_AST_IDENTIFIER) {
+                const char* func_name = slp_ast_get_string(node->as.call.target);
                 if (func_name) {
                     if (string_in_list(symbols->rename_subs, symbols->rename_subs_count, func_name)) {
                         apply_prefix(node->as.call.target, prefix, symbols->allocator);
@@ -523,37 +523,37 @@ static void rewrite_pass(SleepyASTNode* node, SymbolTable* symbols, const char* 
                                strcmp(func_name, "alias_register") == 0 ||
                                strcmp(func_name, "fireAlias") == 0) {
                         if (node->as.call.arg_count > 0 && node->as.call.args[0]) {
-                            SleepyASTNode* arg0 = node->as.call.args[0];
-                            if (arg0->type == SLEEPY_AST_ARG) arg0 = arg0->as.arg.value;
-                            if (arg0 && (arg0->type == SLEEPY_AST_STRING || arg0->type == SLEEPY_AST_LITERAL)) {
-                                const char* cmd_name = sleepy_ast_get_string(arg0);
+                            SlpASTNode* arg0 = node->as.call.args[0];
+                            if (arg0->type == SLP_AST_ARG) arg0 = arg0->as.arg.value;
+                            if (arg0 && (arg0->type == SLP_AST_STRING || arg0->type == SLP_AST_LITERAL)) {
+                                const char* cmd_name = slp_ast_get_string(arg0);
                                 if (cmd_name) {
                                     const char* new_alias = get_renamed_alias(symbols, project_name, cmd_name);
                                     if (new_alias && strcmp(new_alias, cmd_name) != 0) {
                                         char* new_str = symbols->allocator->reallocate(NULL, strlen(new_alias) + 1, symbols->allocator->user_data);
                                         strcpy(new_str, new_alias);
-                                        sleepy_ast_set_string_val(arg0, new_str, symbols->allocator);
+                                        slp_ast_set_string_val(arg0, new_str, symbols->allocator);
                                         symbols->allocator->reallocate(new_str, 0, symbols->allocator->user_data);
                                     }
                                 }
                             }
                         }
                     } else if (strcmp(func_name, "script_resource") == 0 && node->as.call.arg_count > 0 && node->as.call.args[0]) {
-                        SleepyASTNode* arg_node = node->as.call.args[0];
-                        bool is_arg_wrapped = (arg_node->type == SLEEPY_AST_ARG);
-                        SleepyASTNode* val_node = is_arg_wrapped ? arg_node->as.arg.value : arg_node;
+                        SlpASTNode* arg_node = node->as.call.args[0];
+                        bool is_arg_wrapped = (arg_node->type == SLP_AST_ARG);
+                        SlpASTNode* val_node = is_arg_wrapped ? arg_node->as.arg.value : arg_node;
                         
                         size_t path_len = strlen(rel_path) + 2;
                         char* dir_str = symbols->allocator->reallocate(NULL, path_len, symbols->allocator->user_data);
                         strcpy(dir_str, rel_path);
                         strcat(dir_str, "/");
                         
-                        SleepyASTNode* prefix_node = sleepy_ast_build_node(SLEEPY_AST_STRING, node->line, symbols->allocator);
-                        sleepy_ast_set_string_val(prefix_node, dir_str, symbols->allocator);
+                        SlpASTNode* prefix_node = slp_ast_build_node(SLP_AST_STRING, node->line, symbols->allocator);
+                        slp_ast_set_string_val(prefix_node, dir_str, symbols->allocator);
                         symbols->allocator->reallocate(dir_str, 0, symbols->allocator->user_data);
                         
-                        SleepyASTNode* binop = sleepy_ast_build_node(SLEEPY_AST_BINOP, node->line, symbols->allocator);
-                        sleepy_ast_set_binop_with_op(binop, prefix_node, val_node, ".", symbols->allocator);
+                        SlpASTNode* binop = slp_ast_build_node(SLP_AST_BINOP, node->line, symbols->allocator);
+                        slp_ast_set_binop_with_op(binop, prefix_node, val_node, ".", symbols->allocator);
                         
                         if (is_arg_wrapped) {
                             arg_node->as.arg.value = binop;
@@ -572,8 +572,8 @@ static void rewrite_pass(SleepyASTNode* node, SymbolTable* symbols, const char* 
             }
             break;
         }
-        case SLEEPY_AST_STRING: {
-            const char* str = sleepy_ast_get_string(node);
+        case SLP_AST_STRING: {
+            const char* str = slp_ast_get_string(node);
             if (str && (strchr(str, '$') || strchr(str, '@') || strchr(str, '%'))) {
                 // To avoid complex regex in C, we will just iterate over rename_globals
                 // and replace occurrences of `$var` with `$Proj_var`.
@@ -631,16 +631,16 @@ static void rewrite_pass(SleepyASTNode* node, SymbolTable* symbols, const char* 
                 }
                 
                 if (strcmp(current_str, str) != 0) {
-                    sleepy_ast_set_string_val(node, current_str, symbols->allocator);
+                    slp_ast_set_string_val(node, current_str, symbols->allocator);
                 }
                 symbols->allocator->reallocate(current_str, 0, symbols->allocator->user_data);
             }
             break;
         }
-        case SLEEPY_AST_SCALAR:
-        case SLEEPY_AST_ARRAY:
-        case SLEEPY_AST_HASHTABLE: {
-            const char* var_name = sleepy_ast_get_string(node);
+        case SLP_AST_SCALAR:
+        case SLP_AST_ARRAY:
+        case SLP_AST_HASHTABLE: {
+            const char* var_name = slp_ast_get_string(node);
             if (var_name && string_in_list(symbols->rename_globals, symbols->rename_globals_count, var_name)) {
                 bool is_local = active_locals && string_in_list(*active_locals, *active_locals_count, var_name);
                 if (!is_local) {
@@ -650,13 +650,13 @@ static void rewrite_pass(SleepyASTNode* node, SymbolTable* symbols, const char* 
             break;
         }
         default: {
-            SleepyASTNode** children;
+            SlpASTNode** children;
             size_t count;
-            sleepy_ast_get_children(node, &children, &count, symbols->allocator);
+            slp_ast_get_children(node, &children, &count, symbols->allocator);
             for (size_t i = 0; i < count; i++) {
                 rewrite_pass(children[i], symbols, prefix, rel_path, project_name, active_locals, active_locals_count);
             }
-            sleepy_ast_free_children(children, symbols->allocator);
+            slp_ast_free_children(children, symbols->allocator);
             break;
         }
     }
@@ -693,9 +693,9 @@ static char* read_file(const char* path) {
     return buffer;
 }
 
-static void inline_includes(SleepyASTNode* node, SymbolTable* symbols, const char* prefix, const char* project_dir, const char* project_name, int depth);
+static void inline_includes(SlpASTNode* node, SymbolTable* symbols, const char* prefix, const char* project_dir, const char* project_name, int depth);
 
-static SleepyASTNode* process_file(const char* filepath, const char* prefix, const char* project_dir, const char* project_name, SymbolTable* symbols, int depth, SleepyAllocator* allocator) {
+static SlpASTNode* process_file(const char* filepath, const char* prefix, const char* project_dir, const char* project_name, SymbolTable* symbols, int depth, SlpAllocator* allocator) {
     if (depth > 8) {
         fprintf(stderr, "Max include depth exceeded at %s\n", filepath);
         return NULL;
@@ -717,9 +717,9 @@ static SleepyASTNode* process_file(const char* filepath, const char* prefix, con
     char* source = read_file(filepath);
     if (!source) return NULL;
 
-    SleepyParser parser;
-    sleepy_parser_init(&parser, source, allocator);
-    SleepyASTNode* root = sleepy_parser_parse(&parser);
+    SlpParser parser;
+    slp_parser_init(&parser, source, allocator);
+    SlpASTNode* root = slp_parser_parse(&parser);
     
     symbols->sources = allocator->reallocate(symbols->sources, sizeof(char*) * (symbols->sources_count + 1), allocator->user_data);
     symbols->sources[symbols->sources_count++] = source;
@@ -729,7 +729,7 @@ static SleepyASTNode* process_file(const char* filepath, const char* prefix, con
         if (parser.error_message) {
             fprintf(stderr, "[line %d] Error: %s\n", parser.error_line, parser.error_message);
         }
-        if (root) sleepy_parser_free_node(root, allocator);
+        if (root) slp_parser_free_node(root, allocator);
         return NULL;
     }
     
@@ -748,26 +748,26 @@ static SleepyASTNode* process_file(const char* filepath, const char* prefix, con
     return root;
 }
 
-static void inline_includes(SleepyASTNode* node, SymbolTable* symbols, const char* prefix, const char* project_dir, const char* project_name, int depth) {
+static void inline_includes(SlpASTNode* node, SymbolTable* symbols, const char* prefix, const char* project_dir, const char* project_name, int depth) {
     if (!node) return;
     
-    if (node->type == SLEEPY_AST_CALL) {
-        if (node->as.call.target && node->as.call.target->type == SLEEPY_AST_IDENTIFIER) {
-            const char* fn = sleepy_ast_get_string(node->as.call.target);
+    if (node->type == SLP_AST_CALL) {
+        if (node->as.call.target && node->as.call.target->type == SLP_AST_IDENTIFIER) {
+            const char* fn = slp_ast_get_string(node->as.call.target);
             if (fn && strcmp(fn, "include") == 0 && node->as.call.arg_count > 0 && node->as.call.args[0]) {
-                SleepyASTNode* arg0 = node->as.call.args[0];
-                if (arg0->type == SLEEPY_AST_ARG) arg0 = arg0->as.arg.value;
+                SlpASTNode* arg0 = node->as.call.args[0];
+                if (arg0->type == SLP_AST_ARG) arg0 = arg0->as.arg.value;
                 
                 const char* inc_path = NULL;
-                if (arg0 && (arg0->type == SLEEPY_AST_STRING || arg0->type == SLEEPY_AST_LITERAL)) {
-                    inc_path = sleepy_ast_get_string(arg0);
-                } else if (arg0 && arg0->type == SLEEPY_AST_CALL && arg0->as.call.target && arg0->as.call.target->type == SLEEPY_AST_IDENTIFIER) {
-                    const char* inner_fn = sleepy_ast_get_string(arg0->as.call.target);
+                if (arg0 && (arg0->type == SLP_AST_STRING || arg0->type == SLP_AST_LITERAL)) {
+                    inc_path = slp_ast_get_string(arg0);
+                } else if (arg0 && arg0->type == SLP_AST_CALL && arg0->as.call.target && arg0->as.call.target->type == SLP_AST_IDENTIFIER) {
+                    const char* inner_fn = slp_ast_get_string(arg0->as.call.target);
                     if (inner_fn && strcmp(inner_fn, "script_resource") == 0 && arg0->as.call.arg_count > 0 && arg0->as.call.args[0]) {
-                        SleepyASTNode* inner_arg0 = arg0->as.call.args[0];
-                        if (inner_arg0->type == SLEEPY_AST_ARG) inner_arg0 = inner_arg0->as.arg.value;
-                        if (inner_arg0 && (inner_arg0->type == SLEEPY_AST_STRING || inner_arg0->type == SLEEPY_AST_LITERAL)) {
-                            inc_path = sleepy_ast_get_string(inner_arg0);
+                        SlpASTNode* inner_arg0 = arg0->as.call.args[0];
+                        if (inner_arg0->type == SLP_AST_ARG) inner_arg0 = inner_arg0->as.arg.value;
+                        if (inner_arg0 && (inner_arg0->type == SLP_AST_STRING || inner_arg0->type == SLP_AST_LITERAL)) {
+                            inc_path = slp_ast_get_string(inner_arg0);
                         }
                     }
                 }
@@ -779,25 +779,25 @@ static void inline_includes(SleepyASTNode* node, SymbolTable* symbols, const cha
                     strcat(full_path, "/");
                     strcat(full_path, inc_path);
                     
-                    SleepyASTNode* inc_root = process_file(full_path, prefix, project_dir, project_name, symbols, depth + 1, symbols->allocator);
+                    SlpASTNode* inc_root = process_file(full_path, prefix, project_dir, project_name, symbols, depth + 1, symbols->allocator);
                     symbols->allocator->reallocate(full_path, 0, symbols->allocator->user_data);
                     
                     if (inc_root) {
                         // Free the old CALL node children
                         for (size_t i = 0; i < node->as.call.arg_count; i++) {
-                            sleepy_parser_free_node(node->as.call.args[i], symbols->allocator);
+                            slp_parser_free_node(node->as.call.args[i], symbols->allocator);
                         }
                         symbols->allocator->reallocate(node->as.call.args, 0, symbols->allocator->user_data);
-                        sleepy_parser_free_node(node->as.call.target, symbols->allocator);
+                        slp_parser_free_node(node->as.call.target, symbols->allocator);
                         
                         // Convert this CALL node to a BLOCK node containing the included file's statements
-                        node->type = SLEEPY_AST_BLOCK;
+                        node->type = SLP_AST_BLOCK;
                         
-                        if (inc_root->type == SLEEPY_AST_SCRIPT || inc_root->type == SLEEPY_AST_BLOCK) {
+                        if (inc_root->type == SLP_AST_SCRIPT || inc_root->type == SLP_AST_BLOCK) {
                             size_t stmt_count = inc_root->as.block.count;
                             node->as.block.count = stmt_count;
                             node->as.block.capacity = stmt_count;
-                            node->as.block.statements = symbols->allocator->reallocate(NULL, sizeof(SleepyASTNode*) * stmt_count, symbols->allocator->user_data);
+                            node->as.block.statements = symbols->allocator->reallocate(NULL, sizeof(SlpASTNode*) * stmt_count, symbols->allocator->user_data);
                             
                             for (size_t i = 0; i < stmt_count; i++) {
                                 node->as.block.statements[i] = inc_root->as.block.statements[i];
@@ -809,7 +809,7 @@ static void inline_includes(SleepyASTNode* node, SymbolTable* symbols, const cha
                         } else {
                             node->as.block.count = 1;
                             node->as.block.capacity = 1;
-                            node->as.block.statements = symbols->allocator->reallocate(NULL, sizeof(SleepyASTNode*), symbols->allocator->user_data);
+                            node->as.block.statements = symbols->allocator->reallocate(NULL, sizeof(SlpASTNode*), symbols->allocator->user_data);
                             node->as.block.statements[0] = inc_root;
                         }
                         return; // Node transformed, skip further processing on its children since they were already processed in process_file
@@ -819,13 +819,13 @@ static void inline_includes(SleepyASTNode* node, SymbolTable* symbols, const cha
         }
     }
     
-    SleepyASTNode** children;
+    SlpASTNode** children;
     size_t count;
-    sleepy_ast_get_children(node, &children, &count, symbols->allocator);
+    slp_ast_get_children(node, &children, &count, symbols->allocator);
     for (size_t i = 0; i < count; i++) {
         inline_includes(children[i], symbols, prefix, project_dir, project_name, depth);
     }
-    sleepy_ast_free_children(children, symbols->allocator);
+    slp_ast_free_children(children, symbols->allocator);
 }
 
 int main(int argc, char* argv[]) {
@@ -854,7 +854,7 @@ int main(int argc, char* argv[]) {
         parse_config(config_file, &config);
     }
     
-    SleepyAllocator allocator;
+    SlpAllocator allocator;
     allocator.reallocate = default_realloc;
     allocator.user_data = NULL;
     
@@ -870,11 +870,11 @@ int main(int argc, char* argv[]) {
             char* last_slash = strrchr(project_dir, '/');
             if (last_slash) *last_slash = '\0'; else strcpy(project_dir, ".");
             
-            SleepyASTNode* root = process_file(target_dir, "Proj_", project_dir, "Proj", &symbols, 0, &allocator);
+            SlpASTNode* root = process_file(target_dir, "Proj_", project_dir, "Proj", &symbols, 0, &allocator);
             if (root) {
                 if (scan_only) print_symbols(target_dir, &symbols);
                 else {
-                    char* formatted = sleepy_ast_format(root, &allocator);
+                    char* formatted = slp_ast_format(root, &allocator);
                     if (formatted) {
                         if (output_file) {
                             FILE* out = fopen(output_file, "w");
@@ -885,7 +885,7 @@ int main(int argc, char* argv[]) {
                         allocator.reallocate(formatted, 0, allocator.user_data);
                     }
                 }
-                sleepy_parser_free_node(root, &allocator);
+                slp_parser_free_node(root, &allocator);
             }
             free(project_dir);
             free_symbol_table(&symbols);
@@ -896,7 +896,7 @@ int main(int argc, char* argv[]) {
     }
     
     // Bundle mode
-    SleepyASTNode* bundle_root = sleepy_ast_build_node(SLEEPY_AST_BLOCK, 1, &allocator);
+    SlpASTNode* bundle_root = slp_ast_build_node(SLP_AST_BLOCK, 1, &allocator);
     
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {
@@ -916,17 +916,17 @@ int main(int argc, char* argv[]) {
                 }
                 
                 fprintf(stderr, "Bundling project %s from %s with prefix %s\n", entry->d_name, entrypoint, prefix);
-                SleepyASTNode* proj_root = process_file(entrypoint, prefix, path, entry->d_name, &symbols, 0, &allocator);
+                SlpASTNode* proj_root = process_file(entrypoint, prefix, path, entry->d_name, &symbols, 0, &allocator);
                 if (proj_root) {
                     if (scan_only) {
                         print_symbols(entrypoint, &symbols);
-                    } else if (proj_root->type == SLEEPY_AST_SCRIPT || proj_root->type == SLEEPY_AST_BLOCK) {
+                    } else if (proj_root->type == SLP_AST_SCRIPT || proj_root->type == SLP_AST_BLOCK) {
                         size_t stmt_count = proj_root->as.block.count;
                         size_t old_count = bundle_root->as.block.count;
                         size_t new_count = old_count + stmt_count;
                         
                         bundle_root->as.block.capacity = new_count;
-                        bundle_root->as.block.statements = allocator.reallocate(bundle_root->as.block.statements, sizeof(SleepyASTNode*) * new_count, allocator.user_data);
+                        bundle_root->as.block.statements = allocator.reallocate(bundle_root->as.block.statements, sizeof(SlpASTNode*) * new_count, allocator.user_data);
                         
                         for (size_t i = 0; i < stmt_count; i++) {
                             bundle_root->as.block.statements[old_count + i] = proj_root->as.block.statements[i];
@@ -968,7 +968,7 @@ int main(int argc, char* argv[]) {
         }
         
         if (has_collisions) {
-            sleepy_parser_free_node(bundle_root, &allocator);
+            slp_parser_free_node(bundle_root, &allocator);
             free_symbol_table(&symbols);
             if (config.rules) free(config.rules);
             return 1;
@@ -976,7 +976,7 @@ int main(int argc, char* argv[]) {
     }
     
     if (!scan_only) {
-        char* formatted = sleepy_ast_format(bundle_root, &allocator);
+        char* formatted = slp_ast_format(bundle_root, &allocator);
         if (formatted) {
             if (output_file) {
                 FILE* out = fopen(output_file, "w");
@@ -995,7 +995,7 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    sleepy_parser_free_node(bundle_root, &allocator);
+    slp_parser_free_node(bundle_root, &allocator);
     free_symbol_table(&symbols);
     if (config.rules) free(config.rules);
     

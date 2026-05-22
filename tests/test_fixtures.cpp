@@ -1,6 +1,6 @@
 #include "doctest.h"
 extern "C" {
-#include "sleepy_parser.h"
+#include "slp_parser.h"
 }
 #include <dirent.h>
 #include <stdio.h>
@@ -17,7 +17,7 @@ static void *fixture_realloc(void *memory, size_t newSize, void *userData) {
   return realloc(memory, newSize);
 }
 
-static SleepyAllocator fixture_allocator = {fixture_realloc, NULL};
+static SlpAllocator fixture_allocator = {fixture_realloc, NULL};
 } // namespace
 
 TEST_CASE("Parse all .sl fixtures and check error expectations") {
@@ -61,10 +61,10 @@ TEST_CASE("Parse all .sl fixtures and check error expectations") {
         source[read_bytes] = '\0';
         fclose(f);
 
-        SleepyParser parser;
-        sleepy_parser_init(&parser, source, &fixture_allocator);
+        SlpParser parser;
+        slp_parser_init(&parser, source, &fixture_allocator);
 
-        SleepyASTNode *root = sleepy_parser_parse(&parser);
+        SlpASTNode *root = slp_parser_parse(&parser);
 
         if (is_illformed) {
           // We expect an error for these files
@@ -84,10 +84,10 @@ TEST_CASE("Parse all .sl fixtures and check error expectations") {
         }
 
         if (root) {
-          if (root->type == SLEEPY_AST_SCRIPT) {
-            SLEEPY_FREE(&fixture_allocator, root->as.block.statements);
+          if (root->type == SLP_AST_SCRIPT) {
+            SLP_FREE(&fixture_allocator, root->as.block.statements);
           }
-          SLEEPY_FREE(&fixture_allocator, root);
+          SLP_FREE(&fixture_allocator, root);
         }
 
         free(source);
@@ -102,7 +102,7 @@ TEST_CASE("Parse all .sl fixtures and check error expectations") {
 
 TEST_CASE("Parse runtime error scripts - should have no syntax errors") {
   // These scripts have runtime errors but should parse without syntax errors
-  // From reference/sleepy/test.py runtimeErrorScripts list
+  // From reference/slp/test.py runtimeErrorScripts list
   const char *runtimeErrorScripts[] = {
       "bareword.sl",
       "clazz.sl",
@@ -154,10 +154,10 @@ TEST_CASE("Parse runtime error scripts - should have no syntax errors") {
         source[read_bytes] = '\0';
         fclose(f);
 
-        SleepyParser parser;
-        sleepy_parser_init(&parser, source, &fixture_allocator);
+        SlpParser parser;
+        slp_parser_init(&parser, source, &fixture_allocator);
 
-        SleepyASTNode *root = sleepy_parser_parse(&parser);
+        SlpASTNode *root = slp_parser_parse(&parser);
 
         // Runtime error scripts should parse without syntax errors
         // They would fail when executed, but the parser should accept them
@@ -172,10 +172,10 @@ TEST_CASE("Parse runtime error scripts - should have no syntax errors") {
         }
 
         if (root) {
-          if (root->type == SLEEPY_AST_SCRIPT) {
-            SLEEPY_FREE(&fixture_allocator, root->as.block.statements);
+          if (root->type == SLP_AST_SCRIPT) {
+            SLP_FREE(&fixture_allocator, root->as.block.statements);
           }
-          SLEEPY_FREE(&fixture_allocator, root);
+          SLP_FREE(&fixture_allocator, root);
         }
 
         free(source);

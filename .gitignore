@@ -16,7 +16,7 @@
 *.out
 *.app
 test_runner
-sleepy_lib
+slp_lib
 
 # Debug files
 *.dSYM/
@@ -51,9 +51,9 @@ Makefile.bak
 *.gcno
 *.gcov
 coverage.info
-sleepy
-bench_sleepy
-.sleepy_history
+slp
+bench_slp
+.slp_history
 .aggressor_history
 *.cna
 *.test
