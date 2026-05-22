@@ -40,8 +40,21 @@ bench_sleepy: $(OBJ) bench/bench_sleepy.c
 sleepy: $(OBJ) tools/repl.c deps/bestline/bestline.c
 	$(CC) $(CFLAGS) -o $@ tools/repl.c deps/bestline/bestline.c $(OBJ)
 
+cna_bundle: $(OBJ) tools/cna_bundle.c
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o bin/cna_bundle tools/cna_bundle.c $(OBJ)
+
+cna_validator: $(OBJ) tools/cna_validator.c deps/bestline/bestline.c
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o bin/cna_validator tools/cna_validator.c deps/bestline/bestline.c $(OBJ)
+
+tools: cna_bundle cna_validator
+
+aggressor_repl: $(OBJ) tools/aggressor_repl.c deps/bestline/bestline.c
+	$(CC) $(CFLAGS) -o $@ tools/aggressor_repl.c deps/bestline/bestline.c $(OBJ)
+
 clean:
-	rm -rf src/*.o tests/*.o test_runner bench_sleepy sleepy libsleepy.a dist/
+	rm -rf src/*.o tests/*.o test_runner bench_sleepy sleepy cna_bundle aggressor_repl libsleepy.a dist/ bin/
 
 amalgamate:
 	./scripts/amalgamate.sh
