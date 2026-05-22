@@ -22,6 +22,7 @@ double sleepy_ast_get_double(SleepyASTNode *node);
 bool sleepy_ast_get_bool(SleepyASTNode *node);
 
 // Bridge specific getters
+const char *sleepy_ast_get_env_bridge_keyword(SleepyASTNode *node);
 const char *sleepy_ast_get_env_bridge_id(SleepyASTNode *node);
 const char *sleepy_ast_get_env_bridge_string(SleepyASTNode *node);
 const char *sleepy_ast_get_foreach_index(SleepyASTNode *node);

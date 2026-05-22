@@ -366,6 +366,13 @@ bool sleepy_ast_get_bool(SleepyASTNode *node) {
   return (node && node->type == SLEEPY_AST_BOOLEAN) ? node->as.boolean : false;
 }
 
+const char *sleepy_ast_get_env_bridge_keyword(SleepyASTNode *node) {
+  if (node && node->type == SLEEPY_AST_ENV_BRIDGE) {
+    return node->as.env_bridge.keyword;
+  }
+  return NULL;
+}
+
 const char *sleepy_ast_get_env_bridge_id(SleepyASTNode *node) {
   return (node && node->type == SLEEPY_AST_ENV_BRIDGE)
              ? node->as.env_bridge.identifier
@@ -1003,8 +1010,13 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
   case SLEEPY_AST_LITERAL:
   case SLEEPY_AST_STRING: {
     sleepy_string_buffer_append_char(buffer, '"');
-    sleepy_string_buffer_append_string(
-        buffer, node->as.string_val, sleepy_utils_strlen(node->as.string_val));
+    const char *str = node->as.string_val;
+    for (size_t i = 0; str[i] != '\0'; i++) {
+        if (str[i] == '"' || str[i] == '\\') {
+            sleepy_string_buffer_append_char(buffer, '\\');
+        }
+        sleepy_string_buffer_append_char(buffer, str[i]);
+    }
     sleepy_string_buffer_append_char(buffer, '"');
     break;
   }
@@ -1076,6 +1088,18 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
     }
     sleepy_string_buffer_append_char(buffer, ' ');
     format_node(node->as.binop.right, buffer, depth);
+    break;
+  }
+
+  case SLEEPY_AST_LVALUE_TUPLE: {
+    sleepy_string_buffer_append_char(buffer, '(');
+    for (size_t i = 0; i < node->as.block.count; i++) {
+      if (i > 0) {
+        sleepy_string_buffer_append_string(buffer, ", ", 2);
+      }
+      format_node(node->as.block.statements[i], buffer, depth);
+    }
+    sleepy_string_buffer_append_char(buffer, ')');
     break;
   }
 
@@ -1158,12 +1182,18 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
   case SLEEPY_AST_FOREACH: {
     sleepy_string_buffer_append_string(buffer, "foreach ", 8);
     if (node->as.foreach.index) {
+      if (node->as.foreach.index[0] != '$') {
+        sleepy_string_buffer_append_char(buffer, '$');
+      }
       sleepy_string_buffer_append_string(
           buffer, node->as.foreach.index,
           sleepy_utils_strlen(node->as.foreach.index));
       sleepy_string_buffer_append_string(buffer, " => ", 4);
     }
     if (node->as.foreach.value) {
+      if (node->as.foreach.value[0] != '$') {
+        sleepy_string_buffer_append_char(buffer, '$');
+      }
       sleepy_string_buffer_append_string(
           buffer, node->as.foreach.value,
           sleepy_utils_strlen(node->as.foreach.value));
@@ -1299,7 +1329,7 @@ static void format_node(SleepyASTNode *node, SleepyStringBuffer *buffer,
 
   case SLEEPY_AST_KV_PAIR:
   case SLEEPY_AST_ARG: {
-    if (node->type == SLEEPY_AST_KV_PAIR && node->as.arg.name) {
+    if (node->as.arg.name) {
       format_node(node->as.arg.name, buffer, depth);
       sleepy_string_buffer_append_string(buffer, " => ", 4);
     }

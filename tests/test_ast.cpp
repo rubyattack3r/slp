@@ -59,6 +59,11 @@ TEST_CASE("AST Serialization: Literals and Basic Expressions") {
     CHECK(strcmp(res, "\"hello\"") == 0);
   }
 
+  SUBCASE("String Escaping") {
+    char *res = roundtrip("\"hello \\\"world\\\"\\\\\"");
+    CHECK(strcmp(res, "\"hello \\\"world\\\"\\\\\"") == 0);
+  }
+
   SUBCASE("Scalar") {
     char *res = roundtrip("$a");
     CHECK(strcmp(res, "$a") == 0);
@@ -70,6 +75,13 @@ TEST_CASE("AST Serialization: Literals and Basic Expressions") {
     CHECK(!!(res != NULL));
     CHECK(!!(strstr(res, "%hash = %()") != NULL));
     CHECK(!!(strstr(res, "@array = @()") != NULL));
+  }
+
+  SUBCASE("Tuple assignment") {
+    const char *src = "($a, $b) = @(1, 2);";
+    char *res = roundtrip(src);
+    CHECK(!!(res != NULL));
+    CHECK(!!(strstr(res, "($a, $b) = ") != NULL));
   }
 }
 
@@ -90,6 +102,13 @@ TEST_CASE("AST Serialization: Control Flow") {
     CHECK(!!(strstr(res, "while ($true)") != NULL));
     CHECK(!!(strstr(res, "break") != NULL));
   }
+
+  SUBCASE("Foreach loop") {
+    const char *src = "foreach $a => $b (@arr) {\n    break;\n}";
+    char *res = roundtrip(src);
+    CHECK(!!(res != NULL));
+    CHECK(!!(strstr(res, "foreach $a => $b") != NULL)); // tests the `$` prefix fix
+  }
 }
 
 TEST_CASE("AST Serialization: Function Calls") {
@@ -98,6 +117,12 @@ TEST_CASE("AST Serialization: Function Calls") {
     // Our parser currently maps numbers to SLEEPY_AST_NUMBER which unparser
     // doesn't handle yet
     CHECK(!!(strstr(res, "foo(1, 2, 3)") != NULL));
+  }
+
+  SUBCASE("Named arguments call") {
+    char *res = roundtrip("foo(name => \"val\", b => 2)");
+    CHECK(!!(res != NULL));
+    CHECK(!!(strstr(res, "name => \"val\"") != NULL));
   }
 }
 
