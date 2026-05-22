@@ -135,3 +135,28 @@ TEST_CASE("AST Serialization: Environment Bridges") {
     CHECK(!!(strstr(res, "println(\"hello\")") != NULL));
   }
 }
+
+TEST_CASE("AST Serialization: Advanced and Edge Cases") {
+  SUBCASE("For Loop") {
+    const char *src = "for ($i = 0; $i < 10; $i = $i + 1) {\n    println($i);\n}";
+    char *res = roundtrip(src);
+    CHECK(!!(res != NULL));
+    CHECK(!!(strstr(res, "for ($i = 0; $i < 10; $i = $i + 1)") != NULL));
+    CHECK(!!(strstr(res, "println($i)") != NULL));
+  }
+
+  SUBCASE("Try-Catch Block") {
+    const char *src = "try {\n    foo();\n} catch $ex {\n    bar($ex);\n}";
+    char *res = roundtrip(src);
+    CHECK(!!(strstr(res, "try") != NULL));
+    CHECK(!!(strstr(res, "catch ex") != NULL));
+    CHECK(!!(strstr(res, "bar($ex)") != NULL));
+  }
+
+  SUBCASE("Nested Binary Operations") {
+    const char *src = "1 + 2 * 3;";
+    char *res = roundtrip(src);
+    CHECK(!!(res != NULL));
+    CHECK(!!(strstr(res, "1 + 2 * 3") != NULL));
+  }
+}

@@ -1,1 +1,0 @@
-$func = &my_func;

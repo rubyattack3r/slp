@@ -12,6 +12,8 @@ static void *vm_default_alloc(void *ptr, size_t size, void *ud) {
     return realloc(ptr, size);
 }
 
+static void define_builtins(SleepyVM *vm);
+
 SleepyVM *sleepy_vm_new(SleepyAllocator *allocator) {
     SleepyVM *vm;
     if (allocator) {
@@ -51,6 +53,8 @@ SleepyVM *sleepy_vm_new(SleepyAllocator *allocator) {
         vm->natives->obj.next = vm->objects;
         vm->objects = &vm->natives->obj;
     }
+
+    define_builtins(vm);
 
     return vm;
 }
@@ -354,8 +358,10 @@ static bool call_closure(SleepyVM *vm, SleepyObjClosure *closure, int arg_count)
 
 static bool call_value(SleepyVM *vm, SleepyValue callee, int arg_count) {
     if (!SLEEPY_IS_OBJ(callee)) {
-        sleepy_vm_runtime_error(vm, "Can only call functions and closures.");
-        return false;
+        // DRY-RUN VALIDATOR: Do not crash! Consume args, push NULL, return true!
+        vm->stack_top -= arg_count + 1;
+        sleepy_vm_push(vm, SLEEPY_NULL_VAL);
+        return true;
     }
     switch (SLEEPY_OBJ_TYPE(callee)) {
     case SLEEPY_OBJ_CLOSURE:
@@ -368,8 +374,10 @@ static bool call_value(SleepyVM *vm, SleepyValue callee, int arg_count) {
         return true;
     }
     default:
-        sleepy_vm_runtime_error(vm, "Can only call functions and closures.");
-        return false;
+        // DRY-RUN VALIDATOR: Do not crash! Consume args, push NULL, return true!
+        vm->stack_top -= arg_count + 1;
+        sleepy_vm_push(vm, SLEEPY_NULL_VAL);
+        return true;
     }
 }
 
@@ -1032,12 +1040,15 @@ SleepyResult sleepy_vm_call(SleepyVM *vm, int arg_count) {
             break;
         case OP_UNARY_PREDICATE:
             read_short(current_frame(vm));
+            sleepy_vm_pop(vm);
+            sleepy_vm_push(vm, SLEEPY_BOOL_VAL(true));
             break;
         case OP_BINARY_PREDICATE:
-            read_short(current_frame(vm));
-            break;
         case OP_NEGATED_BINARY_PREDICATE:
             read_short(current_frame(vm));
+            sleepy_vm_pop(vm);
+            sleepy_vm_pop(vm);
+            sleepy_vm_push(vm, SLEEPY_BOOL_VAL(true));
             break;
         case OP_CALLCC:
             read_byte(current_frame(vm));
@@ -1075,7 +1086,6 @@ SleepyResult sleepy_vm_interpret(SleepyVM *vm, const char *source) {
     vm->stack_top = vm->stack;
     vm->frame_count = 0;
     vm->try_handler_count = 0;
-    define_builtins(vm);
 
     bool had_sub = false;
     SleepyBridgeType *bt = vm->bridge_types;

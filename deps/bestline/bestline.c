@@ -1,6 +1,6 @@
+#ifndef _WIN32
 /*-*- mode:c;indent-tabs-mode:nil;c-basic-offset:4;tab-width:8;coding:utf-8 -*-│
 │ vi: set et ft=c ts=4 sts=4 sw=4 fenc=utf-8                               :vi │
-╞══════════════════════════════════════════════════════════════════════════════╡
 │                                                                              │
 │ Bestline ── Library for interactive pseudoteletypewriter command             │
 │             sessions using ANSI Standard X3.64 control sequences             │
@@ -4099,3 +4099,59 @@ void bestlineUserIO(int (*userReadFn)(int, void *, int), int (*userWriteFn)(int,
     else
         _MyPoll = MyPoll;
 }
+#else // _WIN32
+
+#include "bestline.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void bestlineSetCompletionCallback(bestlineCompletionCallback *cb) { (void)cb; }
+void bestlineSetHintsCallback(bestlineHintsCallback *cb) { (void)cb; }
+void bestlineSetFreeHintsCallback(bestlineFreeHintsCallback *cb) { (void)cb; }
+void bestlineAddCompletion(bestlineCompletions *lc, const char *str) { (void)lc; (void)str; }
+void bestlineSetXlatCallback(bestlineXlatCallback *cb) { (void)cb; }
+
+char *bestline(const char *prompt) {
+    printf("%s", prompt);
+    fflush(stdout);
+    char *buf = malloc(4096);
+    if (!fgets(buf, 4096, stdin)) {
+        free(buf);
+        return NULL;
+    }
+    size_t len = strlen(buf);
+    if (len > 0 && buf[len - 1] == '\n') {
+        buf[len - 1] = '\0';
+    }
+    return buf;
+}
+
+char *bestlineInit(const char *a, const char *b) { (void)a; (void)b; return NULL; }
+char *bestlineRaw(const char *a, int b, int c) { (void)a; (void)b; (void)c; return NULL; }
+char *bestlineRawInit(const char *a, const char *b, int c, int d) { (void)a; (void)b; (void)c; (void)d; return NULL; }
+char *bestlineWithHistory(const char *a, const char *b) { (void)a; (void)b; return NULL; }
+int bestlineHistoryAdd(const char *line) { (void)line; return 0; }
+int bestlineHistoryLoad(const char *filename) { (void)filename; return 0; }
+int bestlineHistorySave(const char *filename) { (void)filename; return 0; }
+void bestlineBalanceModeEnable(void) {}
+void bestlineBalanceModeDisable(void) {}
+void bestlineEmacsMode(char a) { (void)a; }
+void bestlineClearScreen(int a) { (void)a; }
+void bestlineDisableRawMode(void) {}
+void bestlineFree(void *ptr) { free(ptr); }
+void bestlineFreeCompletions(bestlineCompletions *lc) { (void)lc; }
+void bestlineHistoryFree(void) {}
+void bestlineLlamaMode(char a) { (void)a; }
+void bestlineMaskModeDisable(void) {}
+void bestlineMaskModeEnable(void) {}
+void bestlineUserIO(int (*r)(int, void *, int), int (*w)(int, const void *, int), int (*p)(int, int, int)) { (void)r; (void)w; (void)p; }
+int bestlineCharacterWidth(int a) { return a; }
+char bestlineIsSeparator(unsigned a) { return a; }
+char bestlineNotSeparator(unsigned a) { return a; }
+char bestlineIsXeparator(unsigned a) { return a; }
+unsigned bestlineUppercase(unsigned a) { return a; }
+unsigned bestlineLowercase(unsigned a) { return a; }
+long bestlineReadCharacter(int a, char *b, unsigned long c) { (void)a; (void)b; (void)c; return 0; }
+
+#endif // _WIN32

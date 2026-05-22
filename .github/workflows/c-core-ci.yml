@@ -1,0 +1,49 @@
+name: C Core CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'extensions/**'
+      - 'deps/**'
+      - 'tools/**'
+      - 'Makefile'
+      - '.github/workflows/c-core-ci.yml'
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'extensions/**'
+      - 'deps/**'
+      - 'tools/**'
+      - 'Makefile'
+      - '.github/workflows/c-core-ci.yml'
+
+jobs:
+  test-cross-platform:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify clean build
+        run: |
+          make clean
+          make all
+
+      - name: Run unit tests
+        run: |
+          make test
+
+      - name: Run performance benchmarks
+        run: |
+          make bench

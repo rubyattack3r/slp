@@ -54,6 +54,11 @@ coverage.info
 sleepy
 bench_sleepy
 .sleepy_history
+.aggressor_history
+*.cna
 *.test
 print_*
 run_*
+
+# Scratch / Debugging
+scratch/

@@ -1,60 +1,107 @@
 CC ?= gcc
 CXX ?= g++
 
-CFLAGS = -g -O0 -std=c99 -Wall -Wextra -Iinclude -Ideps/bestline
-CXXFLAGS = -std=c++11 -Wall -Wextra -Iinclude -I.
+CFLAGS = -g -O0 -std=c99 -Wall -Wextra -Iinclude -Ideps/bestline -Iextensions/aggressor
+CXXFLAGS = -std=c++11 -Wall -Wextra -Iinclude -I. -Iextensions/aggressor
 
 SRC = $(wildcard src/*.c)
 OBJ = $(SRC:.c=.o)
 
+# Extension: libaggressor
+AGGRESSOR_SRC = extensions/aggressor/aggressor.c
+AGGRESSOR_OBJ = extensions/aggressor/aggressor.o
+
 TEST_SRC = $(wildcard tests/*.cpp)
 TEST_OBJ = $(TEST_SRC:.cpp=.o)
 
-.PHONY: all clean test bench amalgamate sleepy
+.PHONY: all clean test bench amalgamate sleepy cna_bundler cna_validator aggressor tools sleepy_lib libaggressor test_runner bench_sleepy sleepy_fmt sleepyd
 
-all: sleepy_lib sleepy amalgamate
+all: sleepy_lib libaggressor sleepy tools amalgamate
 
-# For now, sleepy_lib is a static library of the C implementation
-sleepy_lib: $(OBJ)
-	ar rcs libsleepy.a $(OBJ)
+# Static library of the C implementation
+sleepy_lib: bin/libsleepy.a
+
+bin/libsleepy.a: $(OBJ)
+	@mkdir -p bin
+	ar rcs $@ $(OBJ)
+
+# Static library of the Aggressor extensions
+libaggressor: bin/libaggressor.a
+
+bin/libaggressor.a: $(AGGRESSOR_OBJ)
+	@mkdir -p bin
+	ar rcs $@ $(AGGRESSOR_OBJ)
+
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Test runner compiles C++ test files and links with C object files
-test_runner: $(OBJ) $(TEST_OBJ)
+test_runner: bin/test_runner
+
+bin/test_runner: $(OBJ) $(AGGRESSOR_OBJ) $(TEST_OBJ)
+	@mkdir -p bin
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
 tests/%.o: tests/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 test: test_runner
-	./test_runner
+	./bin/test_runner
 
 bench: bench_sleepy
-	./bench_sleepy
+	./bin/bench_sleepy
 
-bench_sleepy: $(OBJ) bench/bench_sleepy.c
-	$(CC) $(CFLAGS) -O2 -o $@ bench/bench_sleepy.c $(OBJ)
+bench_sleepy: bin/bench_sleepy
 
-sleepy: $(OBJ) tools/repl.c deps/bestline/bestline.c
+bin/bench_sleepy: $(OBJ) tools/bench_sleepy.c
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -O2 -o $@ tools/bench_sleepy.c $(OBJ)
+
+sleepy: bin/sleepy
+
+bin/sleepy: $(OBJ) tools/repl.c deps/bestline/bestline.c
+	@mkdir -p bin
 	$(CC) $(CFLAGS) -o $@ tools/repl.c deps/bestline/bestline.c $(OBJ)
 
-cna_bundle: $(OBJ) tools/cna_bundle.c
+cna_bundler: bin/cna_bundler
+
+bin/cna_bundler: $(OBJ) tools/cna_bundler.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o bin/cna_bundle tools/cna_bundle.c $(OBJ)
+	$(CC) $(CFLAGS) -o $@ tools/cna_bundler.c $(OBJ)
 
-cna_validator: $(OBJ) tools/cna_validator.c deps/bestline/bestline.c
+$(AGGRESSOR_OBJ): $(AGGRESSOR_SRC)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+cna_validator: bin/cna_validator
+
+bin/cna_validator: $(OBJ) $(AGGRESSOR_OBJ) tools/cna_validator.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o bin/cna_validator tools/cna_validator.c deps/bestline/bestline.c $(OBJ)
+	$(CC) $(CFLAGS) -o $@ tools/cna_validator.c $(OBJ) $(AGGRESSOR_OBJ)
 
-tools: cna_bundle cna_validator
+aggressor: bin/aggressor
 
-aggressor_repl: $(OBJ) tools/aggressor_repl.c deps/bestline/bestline.c
-	$(CC) $(CFLAGS) -o $@ tools/aggressor_repl.c deps/bestline/bestline.c $(OBJ)
+bin/aggressor: $(OBJ) $(AGGRESSOR_OBJ) tools/aggressor.c deps/bestline/bestline.c
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o $@ tools/aggressor.c deps/bestline/bestline.c $(OBJ) $(AGGRESSOR_OBJ)
+
+sleepy_fmt: bin/sleepy_fmt
+
+bin/sleepy_fmt: $(OBJ) tools/sleepy_fmt.c
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o $@ tools/sleepy_fmt.c $(OBJ)
+
+sleepyd: bin/sleepyd
+
+bin/sleepyd: $(OBJ) tools/sleepyd.c
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o $@ tools/sleepyd.c $(OBJ)
+
+tools: cna_bundler cna_validator aggressor sleepy_fmt sleepyd bench_sleepy
 
 clean:
-	rm -rf src/*.o tests/*.o test_runner bench_sleepy sleepy cna_bundle aggressor_repl libsleepy.a dist/ bin/
+	rm -rf src/*.o tests/*.o extensions/**/*.o extensions/*.o deps/**/*.o
+	rm -rf bin/ dist/ *.cna .aggressor_history .sleepy_history test_no_rewrite
 
 amalgamate:
 	./scripts/amalgamate.sh
