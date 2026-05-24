@@ -8,6 +8,7 @@ extern "C" {
 #include "slp_vm.h"
 #include "slp_compiler.h"
 #include "aggressor.h"
+#include "slp_stdlib.h"
 #include <stdlib.h>
 
 static void *test_vm_alloc(void *ptr, size_t size, void *ud) {
@@ -39,6 +40,7 @@ static SlpValue test_override(SlpVM *vm, SlpValue *args, int argc, void *user_da
 
 TEST_CASE("libaggressor: init and free") {
     SlpVM *vm = slp_vm_new(&vm_allocator);
+    slp_stdlib_init(vm);
     REQUIRE(vm != nullptr);
 
     AggressorConfig cfg = {
@@ -58,6 +60,7 @@ TEST_CASE("libaggressor: fallback and overrides") {
     memset(test_fallback_func, 0, sizeof(test_fallback_func));
 
     SlpVM *vm = slp_vm_new(&vm_allocator);
+    slp_stdlib_init(vm);
     AggressorConfig cfg = {
         .fallback = test_fallback,
         .user_data = nullptr,
@@ -82,6 +85,7 @@ TEST_CASE("libaggressor: fallback and overrides") {
 
 TEST_CASE("libaggressor: builtin pure utilities") {
     SlpVM *vm = slp_vm_new(&vm_allocator);
+    slp_stdlib_init(vm);
     AggressorConfig cfg = {
         .fallback = nullptr,
         .user_data = nullptr,
@@ -89,25 +93,39 @@ TEST_CASE("libaggressor: builtin pure utilities") {
     AggressorState *state = aggressor_init(vm, &cfg);
 
     /* Test iff */
-    SlpResult r = slp_vm_interpret(vm, "iff(true, 1, 2);");
+    SlpResult r = slp_vm_interpret(vm, "assert iff(true, 1, 2) == 1; assert iff(false, 1, 2) == 2;");
     CHECK(r == SLP_OK);
 
     /* Test strlen */
-    r = slp_vm_interpret(vm, "strlen(\"hello\");");
+    r = slp_vm_interpret(vm, "assert strlen(\"hello\") == 5;");
     CHECK(r == SLP_OK);
 
     /* Test size */
-    r = slp_vm_interpret(vm, "size(\"world\");");
+    r = slp_vm_interpret(vm, "assert size(\"world\") == 5;");
     CHECK(r == SLP_OK);
 
     /* Test lc & uc */
-    r = slp_vm_interpret(vm, "lc(\"HELLO\");");
-    CHECK(r == SLP_OK);
-    r = slp_vm_interpret(vm, "uc(\"world\");");
+    r = slp_vm_interpret(vm, "assert lc(\"HELLO\") == \"hello\"; assert uc(\"world\") == \"WORLD\";");
     CHECK(r == SLP_OK);
 
     /* Test replace */
-    r = slp_vm_interpret(vm, "replace(\"foobar\", \"foo\", \"baz\");");
+    r = slp_vm_interpret(vm, "assert replace(\"foobar\", \"foo\", \"baz\") == \"bazbar\";");
+    CHECK(r == SLP_OK);
+
+    /* Test split & join */
+    r = slp_vm_interpret(vm, "assert join(\"-\", split(\" \", \"a b c\")) == \"a-b-c\";");
+    CHECK(r == SLP_OK);
+
+    /* Test keys & values */
+    r = slp_vm_interpret(vm, "$h = %(\"a\" => 1); assert size(keys($h)) == 1; assert keys($h)[0] == \"a\"; assert values($h)[0] == 1;");
+    CHECK(r == SLP_OK);
+
+    /* Test sublist */
+    r = slp_vm_interpret(vm, "$arr = @(1, 2, 3, 4); $sub = sublist($arr, 1, 3); assert size($sub) == 2; assert $sub[0] == 2; assert $sub[1] == 3;");
+    CHECK(r == SLP_OK);
+
+    /* Test rand & tstamp */
+    r = slp_vm_interpret(vm, "assert rand(10) >= 0; assert tstamp() > 0;");
     CHECK(r == SLP_OK);
 
     aggressor_deinit(state);

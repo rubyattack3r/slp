@@ -4,6 +4,7 @@
 #include "slp_compiler.h"
 #include "slp_disasm.h"
 #include "slp_parser.h"
+#include "slp_stdlib.h"
 #include "bestline.h"
 
 #include <stdio.h>
@@ -156,6 +157,7 @@ static void pry_print_value(SlpValue value) {
 
 int main(int argc, char **argv) {
     SlpVM *vm = slp_vm_new(&allocator);
+    slp_stdlib_init(vm);
     slp_vm_set_error_fn(vm, repl_error, NULL);
     slp_vm_set_write_fn(vm, repl_write, NULL);
 

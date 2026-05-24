@@ -46,13 +46,7 @@ struct AggressorState {
     int command_capacity;
 };
 
-static void *aggressor_alloc(SlpVM *vm, size_t size) {
-    return vm->allocator->reallocate(NULL, size, vm->allocator->user_data);
-}
 
-static void aggressor_free(SlpVM *vm, void *ptr) {
-    vm->allocator->reallocate(ptr, 0, vm->allocator->user_data);
-}
 
 static AggressorNativeFn find_override(AggressorState *state, const char *name) {
     for (int i = 0; i < state->override_count; i++) {
@@ -257,202 +251,6 @@ static void register_dispatched(SlpVM *vm, AggressorState *state, const char *na
 }
 
 /* -----------------------------------------------------------------------
- * Built-in Utility Implementations
- * ----------------------------------------------------------------------- */
-
-static SlpValue builtin_iff(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm;
-    if (argc < 3) return SLP_NULL_VAL;
-    if (SLP_IS_TRUE(args[0])) return args[1];
-    return args[2];
-}
-
-static SlpValue builtin_istrue(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm;
-    if (argc < 1) return SLP_NUM_VAL(0);
-    return SLP_NUM_VAL(SLP_IS_TRUE(args[0]) ? 1 : 0);
-}
-
-static SlpValue builtin_isadmin(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm; (void)args; (void)argc;
-    return SLP_NUM_VAL(1);
-}
-
-static SlpValue builtin_isnumber(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm;
-    if (argc < 1) return SLP_NUM_VAL(0);
-    if (SLP_IS_NUM(args[0])) return SLP_NUM_VAL(1);
-    if (SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
-        const char *s = SLP_AS_STRING(args[0])->chars;
-        if (!s || *s == '\0') return SLP_NUM_VAL(0);
-        char *endptr;
-        strtod(s, &endptr);
-        return SLP_NUM_VAL(*endptr == '\0' ? 1 : 0);
-    }
-    return SLP_NUM_VAL(0);
-}
-
-static SlpValue builtin_ismatch(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm; (void)args; (void)argc;
-    return SLP_NUM_VAL(1);
-}
-
-static SlpValue builtin_strlen(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm;
-    if (argc < 1) return SLP_NUM_VAL(0);
-    if (!SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_STRING)
-        return SLP_NUM_VAL(0);
-    return SLP_NUM_VAL((double)SLP_AS_STRING(args[0])->length);
-}
-
-static SlpValue builtin_int(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm;
-    if (argc < 1) return SLP_NUM_VAL(0);
-    if (!SLP_IS_NUM(args[0])) return SLP_NUM_VAL(0);
-    return SLP_NUM_VAL((double)(int)SLP_AS_NUM(args[0]));
-}
-
-static SlpValue builtin_size(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm;
-    if (argc < 1) return SLP_NUM_VAL(0);
-    /* If it's an array, return the actual length */
-    if (SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_ARRAY) {
-        return SLP_NUM_VAL((double)SLP_AS_ARRAY(args[0])->count);
-    }
-    /* If it's a string, return string length */
-    if (SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
-        return SLP_NUM_VAL((double)SLP_AS_STRING(args[0])->length);
-    }
-    return SLP_NUM_VAL(0);
-}
-
-static SlpValue builtin_local(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm; (void)args; (void)argc;
-    return SLP_NULL_VAL;
-}
-
-static SlpValue builtin_print(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm; (void)args; (void)argc;
-    return SLP_NULL_VAL;
-}
-
-static SlpValue builtin_println(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm;
-    if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
-        printf("%s\n", SLP_AS_STRING(args[0])->chars);
-    }
-    return SLP_NULL_VAL;
-}
-
-static SlpValue builtin_ticks(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm; (void)args; (void)argc;
-    return SLP_NUM_VAL(0);
-}
-
-static SlpValue builtin_substr(SlpVM *vm, SlpValue *args, int argc) {
-    (void)vm;
-    if (argc < 2) return SLP_NULL_VAL;
-    if (!SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_STRING)
-        return SLP_NULL_VAL;
-    SlpObjString *str = SLP_AS_STRING(args[0]);
-    int start = SLP_IS_NUM(args[1]) ? (int)SLP_AS_NUM(args[1]) : 0;
-    int end = (argc >= 3 && SLP_IS_NUM(args[2]))
-              ? (int)SLP_AS_NUM(args[2])
-              : (int)str->length;
-    if (start < 0) start = 0;
-    if (end > (int)str->length) end = (int)str->length;
-    if (start >= end) return SLP_OBJ_VAL(slp_vm_copy_string(vm, "", 0));
-    return SLP_OBJ_VAL(slp_vm_copy_string(vm, str->chars + start, end - start));
-}
-
-static SlpValue builtin_lc(SlpVM *vm, SlpValue *args, int argc) {
-    if (argc < 1 || !SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_STRING)
-        return SLP_NULL_VAL;
-    SlpObjString *str = SLP_AS_STRING(args[0]);
-    char *buf = aggressor_alloc(vm, str->length + 1);
-    for (uint32_t i = 0; i < str->length; i++) buf[i] = (char)tolower(str->chars[i]);
-    buf[str->length] = '\0';
-    SlpObjString *result = slp_vm_copy_string(vm, buf, str->length);
-    aggressor_free(vm, buf);
-    return SLP_OBJ_VAL(result);
-}
-
-static SlpValue builtin_uc(SlpVM *vm, SlpValue *args, int argc) {
-    if (argc < 1 || !SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_STRING)
-        return SLP_NULL_VAL;
-    SlpObjString *str = SLP_AS_STRING(args[0]);
-    char *buf = aggressor_alloc(vm, str->length + 1);
-    for (uint32_t i = 0; i < str->length; i++) buf[i] = (char)toupper(str->chars[i]);
-    buf[str->length] = '\0';
-    SlpObjString *result = slp_vm_copy_string(vm, buf, str->length);
-    aggressor_free(vm, buf);
-    return SLP_OBJ_VAL(result);
-}
-
-static SlpValue builtin_replace(SlpVM *vm, SlpValue *args, int argc) {
-    /* replace(string, old, new) */
-    if (argc < 3) return SLP_NULL_VAL;
-    if (!SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_STRING) return args[0];
-    if (!SLP_IS_OBJ(args[1]) || SLP_OBJ_TYPE(args[1]) != SLP_OBJ_STRING) return args[0];
-    if (!SLP_IS_OBJ(args[2]) || SLP_OBJ_TYPE(args[2]) != SLP_OBJ_STRING) return args[0];
-    SlpObjString *src = SLP_AS_STRING(args[0]);
-    SlpObjString *old = SLP_AS_STRING(args[1]);
-    SlpObjString *rep = SLP_AS_STRING(args[2]);
-    if (old->length == 0) return args[0];
-
-    /* Count occurrences to allocate result */
-    int count = 0;
-    const char *p = src->chars;
-    while ((p = strstr(p, old->chars)) != NULL) { count++; p += old->length; }
-    if (count == 0) return args[0];
-
-    uint32_t new_len = src->length + (uint32_t)count * (rep->length - old->length);
-    char *buf = aggressor_alloc(vm, new_len + 1);
-    char *dst = buf;
-    p = src->chars;
-    const char *prev = p;
-    while ((p = strstr(p, old->chars)) != NULL) {
-        memcpy(dst, prev, p - prev);
-        dst += p - prev;
-        memcpy(dst, rep->chars, rep->length);
-        dst += rep->length;
-        p += old->length;
-        prev = p;
-    }
-    memcpy(dst, prev, src->chars + src->length - prev);
-    dst += src->chars + src->length - prev;
-    *dst = '\0';
-
-    SlpObjString *result = slp_vm_copy_string(vm, buf, new_len);
-    aggressor_free(vm, buf);
-    return SLP_OBJ_VAL(result);
-}
-
-/* -----------------------------------------------------------------------
- * Registration: Built-in utilities
- * ----------------------------------------------------------------------- */
-
-static void register_builtins(SlpVM *vm) {
-    slp_vm_register_native(vm, "iff",     builtin_iff);
-    slp_vm_register_native(vm, "-istrue", builtin_istrue);
-    slp_vm_register_native(vm, "-isadmin", builtin_isadmin);
-    slp_vm_register_native(vm, "-isnumber", builtin_isnumber);
-    slp_vm_register_native(vm, "-ismatch", builtin_ismatch);
-    slp_vm_register_native(vm, "strlen",  builtin_strlen);
-    slp_vm_register_native(vm, "int",     builtin_int);
-    slp_vm_register_native(vm, "size",    builtin_size);
-    slp_vm_register_native(vm, "local",   builtin_local);
-    slp_vm_register_native(vm, "print",   builtin_print);
-    slp_vm_register_native(vm, "println", builtin_println);
-    slp_vm_register_native(vm, "ticks",   builtin_ticks);
-    slp_vm_register_native(vm, "substr",  builtin_substr);
-    slp_vm_register_native(vm, "lc",      builtin_lc);
-    slp_vm_register_native(vm, "uc",      builtin_uc);
-    slp_vm_register_native(vm, "replace", builtin_replace);
-    slp_vm_register_native(vm, "strrep",  builtin_replace);  /* alias */
-}
-
-/* -----------------------------------------------------------------------
  * Registration: Dispatched functions (go through override/fallback)
  * ----------------------------------------------------------------------- */
 
@@ -497,18 +295,12 @@ static const char *dispatched_functions[] = {
 
     /* Misc utilities that need dispatch (not pure) */
     "sleep",
-    "rand",
-    "keys",
-    "values",
     "charAt",
     "byteAt",
     "pack",
     "unpack",
     "parseNumber",
-    "tstamp",
     "mynick",
-    "split",
-    "join",
     "left",
 
     NULL  /* sentinel */
@@ -529,9 +321,6 @@ AggressorState *aggressor_init(SlpVM *vm, AggressorConfig *config) {
 
     /* Store state pointer in VM FFI slot 255 */
     slp_vm_ffi_set_long(vm, 255, (int64_t)(uintptr_t)state);
-
-    /* Register built-in pure utilities (always the same) */
-    register_builtins(vm);
 
     /* Register all dispatched functions through trampolines */
     for (int i = 0; dispatched_functions[i] != NULL; i++) {

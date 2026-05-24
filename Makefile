@@ -1,8 +1,8 @@
 CC ?= gcc
 CXX ?= g++
 
-CFLAGS = -g -O0 -std=c99 -Wall -Wextra -Iinclude -Ideps/bestline -Iextensions/aggressor
-CXXFLAGS = -std=c++11 -Wall -Wextra -Iinclude -I. -Iextensions/aggressor
+CFLAGS = -g -O0 -std=c99 -Wall -Wextra -Iinclude -Ideps/bestline -Iextensions/aggressor -Iextensions/stdlib
+CXXFLAGS = -std=c++11 -Wall -Wextra -Iinclude -I. -Iextensions/aggressor -Iextensions/stdlib
 
 SRC = $(wildcard src/*.c)
 OBJ = $(SRC:.c=.o)
@@ -10,6 +10,10 @@ OBJ = $(SRC:.c=.o)
 # Extension: libaggressor
 AGGRESSOR_SRC = extensions/aggressor/aggressor.c
 AGGRESSOR_OBJ = extensions/aggressor/aggressor.o
+
+# Extension: stdlib
+STDLIB_SRC = extensions/stdlib/stdlib.c
+STDLIB_OBJ = extensions/stdlib/stdlib.o
 
 TEST_SRC = $(wildcard tests/*.cpp)
 TEST_OBJ = $(TEST_SRC:.cpp=.o)
@@ -39,7 +43,7 @@ bin/libaggressor.a: $(AGGRESSOR_OBJ)
 # Test runner compiles C++ test files and links with C object files
 test_runner: bin/test_runner
 
-bin/test_runner: $(OBJ) $(AGGRESSOR_OBJ) $(TEST_OBJ)
+bin/test_runner: $(OBJ) $(AGGRESSOR_OBJ) $(STDLIB_OBJ) $(TEST_OBJ)
 	@mkdir -p bin
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
@@ -60,30 +64,33 @@ bin/bench_slp: $(OBJ) tools/bench_slp.c
 
 slp: bin/slp
 
-bin/slp: $(OBJ) tools/slp.c deps/bestline/bestline.c
+bin/slp: $(OBJ) $(STDLIB_OBJ) tools/slp.c deps/bestline/bestline.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o $@ tools/slp.c deps/bestline/bestline.c $(OBJ)
+	$(CC) $(CFLAGS) -o $@ tools/slp.c deps/bestline/bestline.c $(OBJ) $(STDLIB_OBJ)
 
 cna_bundler: bin/cna_bundler
 
-bin/cna_bundler: $(OBJ) tools/cna_bundler.c
+bin/cna_bundler: $(OBJ) $(STDLIB_OBJ) tools/cna_bundler.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o $@ tools/cna_bundler.c $(OBJ)
+	$(CC) $(CFLAGS) -o $@ tools/cna_bundler.c $(OBJ) $(STDLIB_OBJ)
 
 $(AGGRESSOR_OBJ): $(AGGRESSOR_SRC)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(STDLIB_OBJ): $(STDLIB_SRC)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 cna_validator: bin/cna_validator
 
-bin/cna_validator: $(OBJ) $(AGGRESSOR_OBJ) tools/cna_validator.c
+bin/cna_validator: $(OBJ) $(AGGRESSOR_OBJ) $(STDLIB_OBJ) tools/cna_validator.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o $@ tools/cna_validator.c $(OBJ) $(AGGRESSOR_OBJ)
+	$(CC) $(CFLAGS) -o $@ tools/cna_validator.c $(OBJ) $(AGGRESSOR_OBJ) $(STDLIB_OBJ)
 
 aggressor: bin/aggressor
 
-bin/aggressor: $(OBJ) $(AGGRESSOR_OBJ) tools/aggressor.c deps/bestline/bestline.c
+bin/aggressor: $(OBJ) $(AGGRESSOR_OBJ) $(STDLIB_OBJ) tools/aggressor.c deps/bestline/bestline.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o $@ tools/aggressor.c deps/bestline/bestline.c $(OBJ) $(AGGRESSOR_OBJ)
+	$(CC) $(CFLAGS) -o $@ tools/aggressor.c deps/bestline/bestline.c $(OBJ) $(AGGRESSOR_OBJ) $(STDLIB_OBJ)
 
 slp_fmt: bin/slp_fmt
 

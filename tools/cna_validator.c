@@ -13,6 +13,7 @@
 #include "slp_disasm.h"
 #include "slp_parser.h"
 #include "aggressor.h"
+#include "slp_stdlib.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -558,6 +559,7 @@ int main(int argc, char **argv) {
 
     /* Create VM */
     SlpVM *vm = slp_vm_new(&allocator);
+    slp_stdlib_init(vm);
     slp_vm_set_error_fn(vm, repl_error, &state);
     slp_vm_set_write_fn(vm, repl_write, &state);
 
