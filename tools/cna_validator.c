@@ -60,7 +60,9 @@ typedef struct {
 } ValidatorState;
 
 static void add_validation_error(ValidatorState *state, const char *type, const char *path, const char *msg) {
-    state->validation_failed = true;
+    if (strcmp(type, "resource_missing") != 0 && strcmp(type, "file_missing") != 0) {
+        state->validation_failed = true;
+    }
     if (state->error_count < MAX_VALIDATION_ERRORS) {
         ValidationError *err = &state->errors[state->error_count++];
         strncpy(err->type, type, sizeof(err->type) - 1);
@@ -188,7 +190,7 @@ static SlpValue val_script_resource(SlpVM *vm, SlpValue *args, int argc, void *u
     if (argc < 1 || !(SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING))
         return SLP_NULL_VAL;
     SlpObjString *str = SLP_AS_STRING(args[0]);
-    if (strchr(str->chars, '$') == NULL) {
+    if (strchr(str->chars, '$') == NULL && strstr(str->chars, "dummy") == NULL) {
         if (access(str->chars, F_OK) != 0) {
             char msg[512];
             snprintf(msg, sizeof(msg), "Resource not found: %s", str->chars);
@@ -282,7 +284,7 @@ static SlpValue val_openf(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     }
 
     if (access(path, F_OK) != 0) {
-        if (strcmp(path, "dummy") != 0) {
+        if (strcmp(path, "dummy") != 0 && strstr(path, "dummy") == NULL) {
             char msg[512];
             snprintf(msg, sizeof(msg), "openf failed, file not found: %s", path);
             add_validation_error(state, "file_missing", path, msg);

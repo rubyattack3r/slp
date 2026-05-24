@@ -168,7 +168,7 @@ TEST_CASE("VM: @_ local variable argument array") {
             "sub test_arg0 { $result0 = size(@_); }\n"
             "test_arg0();");
         REQUIRE(result == SLP_OK);
-        SlpObjString *name = slp_vm_copy_string(vm, "result0", 7);
+        SlpObjString *name = slp_vm_copy_string(vm, "$result0", 8);
         SlpValue val = slp_obj_hash_get(vm->globals, SLP_OBJ_VAL(name));
         REQUIRE(SLP_IS_NUM(val));
         CHECK(SLP_AS_NUM(val) == 0.0);
@@ -180,7 +180,7 @@ TEST_CASE("VM: @_ local variable argument array") {
             "sub test_arg3 { $result3 = size(@_); }\n"
             "test_arg3(10, 20, 30);");
         REQUIRE(result == SLP_OK);
-        SlpObjString *name = slp_vm_copy_string(vm, "result3", 7);
+        SlpObjString *name = slp_vm_copy_string(vm, "$result3", 8);
         SlpValue val = slp_obj_hash_get(vm->globals, SLP_OBJ_VAL(name));
         REQUIRE(SLP_IS_NUM(val));
         CHECK(SLP_AS_NUM(val) == 3.0);
@@ -192,7 +192,7 @@ TEST_CASE("VM: @_ local variable argument array") {
             "sub test_arg11 { $result11 = size(@_); }\n"
             "test_arg11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);");
         REQUIRE(result == SLP_OK);
-        SlpObjString *name = slp_vm_copy_string(vm, "result11", 8);
+        SlpObjString *name = slp_vm_copy_string(vm, "$result11", 9);
         SlpValue val = slp_obj_hash_get(vm->globals, SLP_OBJ_VAL(name));
         REQUIRE(SLP_IS_NUM(val));
         CHECK(SLP_AS_NUM(val) == 11.0);

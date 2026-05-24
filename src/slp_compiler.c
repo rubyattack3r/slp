@@ -1,6 +1,7 @@
 #include "slp_compiler.h"
 #include "slp_utils.h"
 #include <string.h>
+#include <stdio.h>
 
 static SlpChunk *current_chunk(SlpCompiler *compiler) {
     return compiler->function->chunk;
@@ -81,16 +82,16 @@ static void init_compiler(SlpCompiler *compiler, SlpCompiler *enclosing,
 
     if (enclosing != NULL) {
         for (int i = 1; i <= 9; i++) {
-            char name[2] = {'0' + i, '\0'};
+            char name[3] = {'$', '0' + i, '\0'};
             SlpLocal *arg_local = &compiler->locals[compiler->local_count++];
             arg_local->depth = 0;
             arg_local->is_captured = false;
-            arg_local->name = intern_str(compiler, name, 1);
+            arg_local->name = intern_str(compiler, name, 2);
         }
         SlpLocal *arg_local = &compiler->locals[compiler->local_count++];
         arg_local->depth = 0;
         arg_local->is_captured = false;
-        arg_local->name = intern_str(compiler, "_", 1);
+        arg_local->name = intern_str(compiler, "@_", 2);
     }
 }
 
@@ -238,15 +239,21 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
     }
     case SLP_AST_SCALAR: {
         if (node->as.string_val) {
-            uint32_t slen = (uint32_t)slp_utils_strlen(node->as.string_val);
-            named_variable(compiler, node->as.string_val, slen, false, line);
+            char name_buf[256];
+            snprintf(name_buf, sizeof(name_buf), "$%s", node->as.string_val);
+            named_variable(compiler, name_buf, (uint32_t)strlen(name_buf), false, line);
         }
         break;
     }
     case SLP_AST_ARRAY: {
         if (node->as.string_val) {
-            uint32_t slen = (uint32_t)slp_utils_strlen(node->as.string_val);
-            named_variable(compiler, node->as.string_val, slen, false, line);
+            char name_buf[256];
+            if (strcmp(node->as.string_val, "@") == 0) {
+                snprintf(name_buf, sizeof(name_buf), "%s", node->as.string_val);
+            } else {
+                snprintf(name_buf, sizeof(name_buf), "@%s", node->as.string_val);
+            }
+            named_variable(compiler, name_buf, (uint32_t)strlen(name_buf), false, line);
         } else {
             emit_byte(compiler, OP_PUSH_NULL, line);
         }
@@ -254,8 +261,13 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
     }
     case SLP_AST_HASHTABLE: {
         if (node->as.string_val) {
-            uint32_t slen = (uint32_t)slp_utils_strlen(node->as.string_val);
-            named_variable(compiler, node->as.string_val, slen, false, line);
+            char name_buf[256];
+            if (strcmp(node->as.string_val, "%") == 0) {
+                snprintf(name_buf, sizeof(name_buf), "%s", node->as.string_val);
+            } else {
+                snprintf(name_buf, sizeof(name_buf), "%%%s", node->as.string_val);
+            }
+            named_variable(compiler, name_buf, (uint32_t)strlen(name_buf), false, line);
         } else {
             emit_byte(compiler, OP_PUSH_NULL, line);
         }
@@ -327,17 +339,26 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
         SlpASTNode *operand = node->as.unaryop.operand;
         if (op.type == SLP_TOKEN_INC || op.type == SLP_TOKEN_DEC) {
             if (operand && operand->as.string_val) {
-                const char *var_name = operand->as.string_val;
-                uint32_t slen = (uint32_t)slp_utils_strlen(var_name);
-                named_variable(compiler, var_name, slen, false, line);
+                char name_buf[256];
+                if (operand->type == SLP_AST_SCALAR) {
+                    snprintf(name_buf, sizeof(name_buf), "$%s", operand->as.string_val);
+                } else if (operand->type == SLP_AST_ARRAY) {
+                    snprintf(name_buf, sizeof(name_buf), "@%s", operand->as.string_val);
+                } else if (operand->type == SLP_AST_HASHTABLE) {
+                    snprintf(name_buf, sizeof(name_buf), "%%%s", operand->as.string_val);
+                } else {
+                    snprintf(name_buf, sizeof(name_buf), "%s", operand->as.string_val);
+                }
+                uint32_t slen = (uint32_t)strlen(name_buf);
+                named_variable(compiler, name_buf, slen, false, line);
                 if (node->as.unaryop.is_postfix) {
                     emit_byte(compiler, OP_DUP, line);
                     emit_byte(compiler, op.type == SLP_TOKEN_INC ? OP_INCREMENT : OP_DECREMENT, line);
-                    named_variable(compiler, var_name, slen, true, line);
+                    named_variable(compiler, name_buf, slen, true, line);
                     emit_byte(compiler, OP_POP, line);
                 } else {
                     emit_byte(compiler, op.type == SLP_TOKEN_INC ? OP_INCREMENT : OP_DECREMENT, line);
-                    named_variable(compiler, var_name, slen, true, line);
+                    named_variable(compiler, name_buf, slen, true, line);
                 }
             } else {
                 compile_expr(compiler, operand);
@@ -369,11 +390,29 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
             case SLP_AST_HASHTABLE:
             case SLP_AST_IDENTIFIER: {
                 if (node->as.assign.left->as.string_val) {
-                    uint32_t slen = (uint32_t)slp_utils_strlen(node->as.assign.left->as.string_val);
-                    if (node->as.assign.op.type != SLP_TOKEN_EQUAL) {
-                        named_variable(compiler, node->as.assign.left->as.string_val, slen, false, line);
+                    char name_buf[256];
+                    if (node->as.assign.left->type == SLP_AST_SCALAR) {
+                        snprintf(name_buf, sizeof(name_buf), "$%s", node->as.assign.left->as.string_val);
+                    } else if (node->as.assign.left->type == SLP_AST_ARRAY) {
+                        if (strcmp(node->as.assign.left->as.string_val, "@") == 0) {
+                            snprintf(name_buf, sizeof(name_buf), "%s", node->as.assign.left->as.string_val);
+                        } else {
+                            snprintf(name_buf, sizeof(name_buf), "@%s", node->as.assign.left->as.string_val);
+                        }
+                    } else if (node->as.assign.left->type == SLP_AST_HASHTABLE) {
+                        if (strcmp(node->as.assign.left->as.string_val, "%") == 0) {
+                            snprintf(name_buf, sizeof(name_buf), "%s", node->as.assign.left->as.string_val);
+                        } else {
+                            snprintf(name_buf, sizeof(name_buf), "%%%s", node->as.assign.left->as.string_val);
+                        }
+                    } else {
+                        snprintf(name_buf, sizeof(name_buf), "%s", node->as.assign.left->as.string_val);
                     }
-                    named_variable(compiler, node->as.assign.left->as.string_val, slen, true, line);
+                    uint32_t slen = (uint32_t)strlen(name_buf);
+                    if (node->as.assign.op.type != SLP_TOKEN_EQUAL) {
+                        named_variable(compiler, name_buf, slen, false, line);
+                    }
+                    named_variable(compiler, name_buf, slen, true, line);
                 }
                 break;
             }
@@ -513,20 +552,23 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
         compiler->loop_exit_jump = exit_jump;
 
         if (node->as.foreach.index) {
-            SlpObjString *vname = intern_str(compiler, node->as.foreach.value,
-                (uint32_t)slp_utils_strlen(node->as.foreach.value));
+            char val_buf[256];
+            snprintf(val_buf, sizeof(val_buf), "$%s", node->as.foreach.value);
+            SlpObjString *vname = intern_str(compiler, val_buf, (uint32_t)strlen(val_buf));
             emit_byte(compiler, OP_STORE_GLOBAL, line);
             emit_short(compiler, make_constant(compiler, SLP_OBJ_VAL(vname)), line);
             emit_byte(compiler, OP_POP, line);
 
-            SlpObjString *iname = intern_str(compiler, node->as.foreach.index,
-                (uint32_t)slp_utils_strlen(node->as.foreach.index));
+            char idx_buf[256];
+            snprintf(idx_buf, sizeof(idx_buf), "$%s", node->as.foreach.index);
+            SlpObjString *iname = intern_str(compiler, idx_buf, (uint32_t)strlen(idx_buf));
             emit_byte(compiler, OP_STORE_GLOBAL, line);
             emit_short(compiler, make_constant(compiler, SLP_OBJ_VAL(iname)), line);
             emit_byte(compiler, OP_POP, line);
         } else {
-            SlpObjString *vname = intern_str(compiler, node->as.foreach.value,
-                (uint32_t)slp_utils_strlen(node->as.foreach.value));
+            char val_buf[256];
+            snprintf(val_buf, sizeof(val_buf), "$%s", node->as.foreach.value);
+            SlpObjString *vname = intern_str(compiler, val_buf, (uint32_t)strlen(val_buf));
             emit_byte(compiler, OP_STORE_GLOBAL, line);
             emit_short(compiler, make_constant(compiler, SLP_OBJ_VAL(vname)), line);
             emit_byte(compiler, OP_POP, line);

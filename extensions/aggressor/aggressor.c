@@ -136,6 +136,7 @@ void aggressor_deinit(AggressorState *state) {
 /* Dispatch logic shared by all trampolines */
 static SlpValue dispatch(SlpVM *vm, AggressorState *state, const char *name,
                              SlpValue *args, int argc) {
+    printf("[DISPATCH] Calling function: %s (argc=%d)\n", name, argc);
     /* Check for explicit override first */
     AggressorNativeFn override = find_override(state, name);
     if (override) {

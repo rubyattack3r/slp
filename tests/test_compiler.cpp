@@ -99,7 +99,7 @@ TEST_CASE("Compiler: variable assignment and access") {
     CHECK(c->code[0] == OP_PUSH_CONST);
     CHECK(c->code[3] == OP_STORE_GLOBAL);
     SlpObjString *name = SLP_AS_STRING(c->constants[slp_chunk_read_short(c, 4)]);
-    CHECK(strcmp(name->chars, "x") == 0);
+    CHECK(strcmp(name->chars, "$x") == 0);
     slp_vm_free(vm);
 }
 
