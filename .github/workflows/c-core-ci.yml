@@ -62,9 +62,7 @@ jobs:
 
       - name: Run CNA Dry-Run Validator (Simulations)
         run: |
-          ./bin/cna_validator ./dist/packaged_tools.cna --format text
-          ./bin/cna_validator ./dist/packaged_tools.cna --format json > dist/validation_report.json
-          ./bin/cna_validator ./dist/packaged_tools.cna --format junit > dist/validation_report.xml
+          ./bin/cna_validator ./dist/packaged_tools.cna
 
       - name: Archive and Package Consolidated CNA Bundle
         uses: actions/upload-artifact@v4
@@ -72,5 +70,3 @@ jobs:
           name: packaged-cna-bundle-${{ matrix.os }}
           path: |
             dist/packaged_tools.cna
-            dist/validation_report.json
-            dist/validation_report.xml

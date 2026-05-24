@@ -31,12 +31,6 @@
  * Validator State & Structs
  * ----------------------------------------------------------------------- */
 
-typedef enum {
-    FORMAT_TEXT,
-    FORMAT_JSON,
-    FORMAT_JUNIT
-} OutputFormat;
-
 typedef struct {
     char type[64];
     char path[256];
@@ -56,7 +50,6 @@ typedef struct {
 
 typedef struct {
     bool validation_failed;
-    OutputFormat format;
     ValidationError errors[MAX_VALIDATION_ERRORS];
     int error_count;
     char current_alias[128];
@@ -95,37 +88,26 @@ static SlpAllocator allocator = {repl_alloc, NULL};
 
 static void repl_error(void *ud, int line, const char *msg) {
     ValidatorState *state = (ValidatorState *)ud;
-    if (state && state->format != FORMAT_TEXT) {
-        char err_msg[512];
-        if (line > 0) {
-            snprintf(err_msg, sizeof(err_msg), "Line %d: %s", line, msg);
-        } else {
-            snprintf(err_msg, sizeof(err_msg), "%s", msg);
-        }
-        add_validation_error(state, "runtime_error", NULL, err_msg);
-        return;
-    }
-    if (line > 0)
+    char err_msg[512];
+    if (line > 0) {
+        snprintf(err_msg, sizeof(err_msg), "Line %d: %s", line, msg);
         fprintf(stderr, "Error line %d: %s\n", line, msg);
-    else
+    } else {
+        snprintf(err_msg, sizeof(err_msg), "%s", msg);
         fprintf(stderr, "Error: %s\n", msg);
+    }
+    if (state) {
+        add_validation_error(state, "runtime_error", NULL, err_msg);
+    }
 }
 
 static void repl_write(void *ud, const char *msg) {
-    ValidatorState *state = (ValidatorState *)ud;
-    if (state && state->format != FORMAT_TEXT) {
-        return;
-    }
+    (void)ud;
     printf("%s", msg);
 }
 
-static ValidatorState *global_validator_state = NULL;
-
 static SlpValue val_println(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm;
-    if (global_validator_state && global_validator_state->format != FORMAT_TEXT) {
-        return SLP_NULL_VAL;
-    }
     if (argc > 0) {
         if (SLP_IS_NUM(args[0]))
             printf("%g\n", SLP_AS_NUM(args[0]));
@@ -146,122 +128,6 @@ static SlpValue val_println(SlpVM *vm, SlpValue *args, int argc) {
     return SLP_NULL_VAL;
 }
 
-static void print_escaped_json(const char *str) {
-    if (!str) return;
-    while (*str) {
-        if (*str == '\\') {
-            printf("\\\\");
-        } else if (*str == '"') {
-            printf("\\\"");
-        } else if (*str == '\n') {
-            printf("\\n");
-        } else if (*str == '\r') {
-            printf("\\r");
-        } else if (*str == '\t') {
-            printf("\\t");
-        } else {
-            putchar(*str);
-        }
-        str++;
-    }
-}
-
-static void print_json_report(ValidatorState *state, int aliases_registered) {
-    printf("{\n");
-    printf("  \"status\": \"%s\",\n", state->validation_failed ? "FAILED" : "SUCCESS");
-    printf("  \"aliases_registered\": %d,\n", aliases_registered);
-    printf("  \"aliases_tested\": %d,\n", aliases_registered);
-    printf("  \"errors\": [\n");
-    for (int i = 0; i < state->error_count; i++) {
-        ValidationError *err = &state->errors[i];
-        printf("    {\n");
-        printf("      \"type\": \""); print_escaped_json(err->type); printf("\",\n");
-        printf("      \"path\": \""); print_escaped_json(err->path); printf("\",\n");
-        printf("      \"alias\": \""); print_escaped_json(err->alias); printf("\",\n");
-        printf("      \"message\": \""); print_escaped_json(err->message); printf("\"\n");
-        printf("    }%s\n", (i == state->error_count - 1) ? "" : ",");
-    }
-    printf("  ]\n");
-    printf("}\n");
-}
-
-static void print_escaped_xml(const char *str) {
-    if (!str) return;
-    while (*str) {
-        if (*str == '&') {
-            printf("&amp;");
-        } else if (*str == '<') {
-            printf("&lt;");
-        } else if (*str == '>') {
-            printf("&gt;");
-        } else if (*str == '"') {
-            printf("&quot;");
-        } else if (*str == '\'') {
-            printf("&apos;");
-        } else {
-            putchar(*str);
-        }
-        str++;
-    }
-}
-
-static void print_junit_report(ValidatorState *state, int aliases_registered, int alias_count, AliasRecord *alias_registry) {
-    int total_failures = state->error_count;
-
-    printf("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    printf("<testsuites>\n");
-    printf("  <testsuite name=\"cna_validator\" tests=\"%d\" failures=\"%d\" errors=\"0\">\n",
-           aliases_registered + (state->error_count > 0 && alias_count == 0 ? 1 : 0), total_failures);
-
-    for (int i = 0; i < state->error_count; i++) {
-        if (strcmp(state->errors[i].alias, "") == 0) {
-            printf("    <testcase name=\"global_load\" classname=\"cna_validator\">\n");
-            printf("      <failure message=\"");
-            print_escaped_xml(state->errors[i].message);
-            printf("\" type=\"");
-            print_escaped_xml(state->errors[i].type);
-            printf("\">\n");
-            print_escaped_xml(state->errors[i].message);
-            printf("\n      </failure>\n");
-            printf("    </testcase>\n");
-        }
-    }
-
-    for (int i = 0; i < alias_count; i++) {
-        const char *alias_name = alias_registry[i].name;
-        int alias_error_count = 0;
-        for (int j = 0; j < state->error_count; j++) {
-            if (strcmp(state->errors[j].alias, alias_name) == 0) {
-                alias_error_count++;
-            }
-        }
-
-        if (alias_error_count > 0) {
-            printf("    <testcase name=\"");
-            print_escaped_xml(alias_name);
-            printf("\" classname=\"cna_validator.alias\">\n");
-            for (int j = 0; j < state->error_count; j++) {
-                if (strcmp(state->errors[j].alias, alias_name) == 0) {
-                    printf("      <failure message=\"");
-                    print_escaped_xml(state->errors[j].message);
-                    printf("\" type=\"");
-                    print_escaped_xml(state->errors[j].type);
-                    printf("\">\n");
-                    print_escaped_xml(state->errors[j].message);
-                    printf("\n      </failure>\n");
-                }
-            }
-            printf("    </testcase>\n");
-        } else {
-            printf("    <testcase name=\"");
-            print_escaped_xml(alias_name);
-            printf("\" classname=\"cna_validator.alias\"/>\n");
-        }
-    }
-
-    printf("  </testsuite>\n");
-    printf("</testsuites>\n");
-}
 
 static AliasRecord alias_registry[MAX_ALIASES];
 static int alias_count = 0;
@@ -327,9 +193,7 @@ static SlpValue val_script_resource(SlpVM *vm, SlpValue *args, int argc, void *u
             char msg[512];
             snprintf(msg, sizeof(msg), "Resource not found: %s", str->chars);
             add_validation_error(state, "resource_missing", str->chars, msg);
-            if (state->format == FORMAT_TEXT) {
-                fprintf(stderr, "\x1b[31m[!] Validation Error: Resource not found: %s\x1b[0m\n", str->chars);
-            }
+            fprintf(stderr, "\x1b[31m[!] Validation Error: Resource not found: %s\x1b[0m\n", str->chars);
         }
     }
     return SLP_OBJ_VAL(slp_vm_copy_string(vm, str->chars, str->length));
@@ -341,36 +205,31 @@ static SlpValue val_bof_pack(SlpVM *vm, SlpValue *args, int argc, void *ud) {
 }
 
 static SlpValue val_btask(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    ValidatorState *state = (ValidatorState *)ud;
-    (void)vm;
-    if (state->format == FORMAT_TEXT && argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
+    (void)ud; (void)vm;
+    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
         printf("[Task] %s\n", SLP_AS_STRING(args[1])->chars);
     return SLP_NULL_VAL;
 }
 
 static SlpValue val_blog(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    ValidatorState *state = (ValidatorState *)ud;
-    (void)vm;
-    if (state->format == FORMAT_TEXT && argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
+    (void)ud; (void)vm;
+    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
         printf("[Log] %s\n", SLP_AS_STRING(args[1])->chars);
     return SLP_NULL_VAL;
 }
 
 static SlpValue val_berror(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    ValidatorState *state = (ValidatorState *)ud;
-    (void)vm;
-    if (state->format == FORMAT_TEXT && argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
+    (void)ud; (void)vm;
+    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
         printf("\x1b[31m[Error]\x1b[0m %s\n", SLP_AS_STRING(args[1])->chars);
     return SLP_NULL_VAL;
 }
 
 static SlpValue val_beacon_command_register(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    ValidatorState *v_state = (ValidatorState *)ud;
+    (void)ud;
     if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
         const char *name = SLP_AS_STRING(args[0])->chars;
-        if (v_state && v_state->format == FORMAT_TEXT) {
-            printf("[+] Registered command: %s\n", name);
-        }
+        printf("[+] Registered command: %s\n", name);
 
         int64_t addr = slp_vm_ffi_get_long(vm, 255);
         AggressorState *state = (AggressorState *)(uintptr_t)addr;
@@ -384,17 +243,14 @@ static SlpValue val_beacon_command_register(SlpVM *vm, SlpValue *args, int argc,
 }
 
 static SlpValue val_beacon_inline_execute(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    ValidatorState *state = (ValidatorState *)ud;
-    (void)vm;
-    if (state->format == FORMAT_TEXT) {
-        printf("[+] \x1b[36mbeacon_inline_execute\x1b[0m triggered!\n");
-        if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
-            printf("    -> BOF data length: %d bytes\n", SLP_AS_STRING(args[1])->length);
-        if (argc >= 3 && SLP_IS_OBJ(args[2]) && SLP_OBJ_TYPE(args[2]) == SLP_OBJ_STRING)
-            printf("    -> Entrypoint: %s\n", SLP_AS_STRING(args[2])->chars);
-        if (argc >= 4 && SLP_IS_OBJ(args[3]) && SLP_OBJ_TYPE(args[3]) == SLP_OBJ_STRING)
-            printf("    -> Args length: %d bytes\n", SLP_AS_STRING(args[3])->length);
-    }
+    (void)ud; (void)vm;
+    printf("[+] \x1b[36mbeacon_inline_execute\x1b[0m triggered!\n");
+    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
+        printf("    -> BOF data length: %d bytes\n", SLP_AS_STRING(args[1])->length);
+    if (argc >= 3 && SLP_IS_OBJ(args[2]) && SLP_OBJ_TYPE(args[2]) == SLP_OBJ_STRING)
+        printf("    -> Entrypoint: %s\n", SLP_AS_STRING(args[2])->chars);
+    if (argc >= 4 && SLP_IS_OBJ(args[3]) && SLP_OBJ_TYPE(args[3]) == SLP_OBJ_STRING)
+        printf("    -> Args length: %d bytes\n", SLP_AS_STRING(args[3])->length);
     return SLP_NULL_VAL;
 }
 
@@ -430,9 +286,7 @@ static SlpValue val_openf(SlpVM *vm, SlpValue *args, int argc, void *ud) {
             char msg[512];
             snprintf(msg, sizeof(msg), "openf failed, file not found: %s", path);
             add_validation_error(state, "file_missing", path, msg);
-            if (state->format == FORMAT_TEXT) {
-                fprintf(stderr, "\x1b[31m[!] Validation Error: openf failed, file not found: %s\x1b[0m\n", path);
-            }
+            fprintf(stderr, "\x1b[31m[!] Validation Error: openf failed, file not found: %s\x1b[0m\n", path);
         }
         return SLP_NUM_VAL(-1);
     }
@@ -526,43 +380,21 @@ static SlpValue validator_fallback(SlpVM *vm, const char *func_name,
 
 int main(int argc, char **argv) {
     const char *script_file = NULL;
-    OutputFormat fmt = FORMAT_TEXT;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--format") == 0 && i + 1 < argc) {
-            i++;
-            if (strcmp(argv[i], "json") == 0) {
-                fmt = FORMAT_JSON;
-            } else if (strcmp(argv[i], "junit") == 0) {
-                fmt = FORMAT_JUNIT;
-            } else {
-                fmt = FORMAT_TEXT;
-            }
-        } else if (strncmp(argv[i], "--format=", 9) == 0) {
-            const char *val = argv[i] + 9;
-            if (strcmp(val, "json") == 0) {
-                fmt = FORMAT_JSON;
-            } else if (strcmp(val, "junit") == 0) {
-                fmt = FORMAT_JUNIT;
-            } else {
-                fmt = FORMAT_TEXT;
-            }
-        } else if (script_file == NULL) {
+        if (script_file == NULL) {
             script_file = argv[i];
         }
     }
 
     if (!script_file) {
-        printf("Usage: %s <bundle.cna> [--format <text|json|junit>]\n", argv[0]);
+        printf("Usage: %s <bundle.cna>\n", argv[0]);
         return 0;
     }
 
     /* Initialize validator state */
     ValidatorState state;
     memset(&state, 0, sizeof(state));
-    state.format = fmt;
-
-    global_validator_state = &state;
 
     /* Create VM */
     SlpVM *vm = slp_vm_new(&allocator);
@@ -603,22 +435,13 @@ int main(int argc, char **argv) {
     aggressor_set_bridge_ops(vm, &bridge_ops);
 
     /* Load and validate the script */
-    if (state.format == FORMAT_TEXT) {
-        printf("[*] Loading and validating %s...\n", script_file);
-    }
+    printf("[*] Loading and validating %s...\n", script_file);
     FILE *f = fopen(script_file, "rb");
     if (!f) {
         char msg[512];
         snprintf(msg, sizeof(msg), "Could not open file: %s", script_file);
         add_validation_error(&state, "file_open_failed", script_file, msg);
-        if (state.format == FORMAT_TEXT) {
-            fprintf(stderr, "Could not open file: %s\n", script_file);
-        }
-        if (state.format == FORMAT_JSON) {
-            print_json_report(&state, 0);
-        } else if (state.format == FORMAT_JUNIT) {
-            print_junit_report(&state, 0, 0, NULL);
-        }
+        fprintf(stderr, "Could not open file: %s\n", script_file);
         aggressor_deinit(ag_state);
         slp_vm_free(vm);
         return 1;
@@ -635,23 +458,14 @@ int main(int argc, char **argv) {
     free(source);
     if (r != SLP_OK) {
         add_validation_error(&state, "global_load_failed", NULL, "Failed evaluating the script during initial load.");
-        if (state.format == FORMAT_TEXT) {
-            fprintf(stderr, "[!] Validation failed: error evaluating the script.\n");
-        }
-        if (state.format == FORMAT_JSON) {
-            print_json_report(&state, 0);
-        } else if (state.format == FORMAT_JUNIT) {
-            print_junit_report(&state, 0, 0, NULL);
-        }
+        fprintf(stderr, "[!] Validation failed: error evaluating the script.\n");
         aggressor_deinit(ag_state);
         slp_vm_free(vm);
         return 1;
     }
 
-    if (state.format == FORMAT_TEXT) {
-        printf("[+] Global load successful.\n");
-        printf("[+] Executing dry-runs on %d aliases...\n", alias_count);
-    }
+    printf("[+] Global load successful.\n");
+    printf("[+] Executing dry-runs on %d aliases...\n", alias_count);
 
     for (int i = 0; i < alias_count; i++) {
         strncpy(state.current_alias, alias_registry[i].name, sizeof(state.current_alias) - 1);
@@ -663,26 +477,18 @@ int main(int argc, char **argv) {
             char msg[512];
             snprintf(msg, sizeof(msg), "Execution crashed in alias '%s'", alias_registry[i].name);
             add_validation_error(&state, "execution_crash", NULL, msg);
-            if (state.format == FORMAT_TEXT) {
-                fprintf(stderr, "\x1b[31m[!] Validation Error: Execution crashed in alias '%s'\x1b[0m\n",
-                        alias_registry[i].name);
-            }
+            fprintf(stderr, "\x1b[31m[!] Validation Error: Execution crashed in alias '%s'\x1b[0m\n",
+                    alias_registry[i].name);
         }
     }
     /* Clear current alias context */
     strcpy(state.current_alias, "");
 
     /* Report final status */
-    if (state.format == FORMAT_TEXT) {
-        if (state.validation_failed) {
-            fprintf(stderr, "\x1b[31m[!] Validation FAILED.\x1b[0m\n");
-        } else {
-            printf("[+] Validation SUCCESSFUL.\n");
-        }
-    } else if (state.format == FORMAT_JSON) {
-        print_json_report(&state, alias_count);
-    } else if (state.format == FORMAT_JUNIT) {
-        print_junit_report(&state, alias_count, alias_count, alias_registry);
+    if (state.validation_failed) {
+        fprintf(stderr, "\x1b[31m[!] Validation FAILED.\x1b[0m\n");
+    } else {
+        printf("[+] Validation SUCCESSFUL.\n");
     }
 
     aggressor_deinit(ag_state);
