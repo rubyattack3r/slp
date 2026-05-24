@@ -1,6 +1,6 @@
 # Sleep C Implementation
 
-This project is a C implementation of a parser, lexer, and eventually a VM for the `sleep` programming language.
+This project is a complete, native C implementation of a parser, lexer, and stack-based VM for the `sleep` programming language.
 
 ## Design Constraints
 
@@ -104,15 +104,15 @@ The `cna_validator` performs dry-run syntax and semantic simulation of a consoli
   ```
 
 ### 6. Interactive Aggressor REPL (`aggressor`)
-The `aggressor` tool is an interactive shell and Cobalt Strike beacon emulation console.
+The `aggressor` tool is an interactive shell and Cobalt Strike beacon emulation console with a built-in cross-platform BOF (Beacon Object File) loader.
 - **How It Works**: It loads a consolidated CNA script, registers Aggressor functions, and starts a **dual-mode shell** featuring context-aware tab completions and inline greyed-out completions (readline hints):
   - **Aggressor Mode (Default)**: Direct evaluation of arbitrary Sleep statements, supporting multi-line balanced brackets/braces/parentheses and beautiful, syntax-colored value output.
-  - **Beacon Emulation Mode**: Entered by typing `interact <beacon_id>`. Automatically provisions a realistic mock beacon environment (matching `x64` arch, OS Windows, fake IP/host) and redirects console commands directly to Aggressor script alias invocations.
+  - **Beacon Emulation Mode**: Entered by typing `interact <beacon_id>`. Automatically provisions a realistic mock beacon environment (matching `x64` arch, OS Windows, fake IP/host) and redirects console commands directly to Aggressor script alias invocations. If an alias uses `beacon_inline_execute`, the built-in BOF loader executes the payload (natively on Windows, or mock-dry-run on POSIX).
 - **Build**:
   ```bash
   make aggressor
   ```
-- **Usage**:
+- **Interactive Usage**:
   ```bash
   ./bin/aggressor <bundle.cna>
   ```
@@ -122,6 +122,22 @@ The `aggressor` tool is an interactive shell and Cobalt Strike beacon emulation 
     ```
     The prompt changes to `beacon 123> ` and accepts all alias commands directly, emulating Cobalt Strike's console.
   - Type `back` to return to Aggressor scripting mode.
+
+- **Non-Interactive (Headless) Usage**:
+  You can execute specific beacon commands directly from the command line, supplying trailing arguments to the script via `@ARGV`.
+  ```bash
+  # Execute a single beacon alias command (-i) against a mock beacon and exit
+  ./bin/aggressor bundle.cna -i "whoami"
+
+  # Execute a raw Sleep statement (-c) and exit
+  ./bin/aggressor bundle.cna -c "println('hello');"
+
+  # Increase verbosity (-v or -vv) to see task logs and internal DISPATCH traces
+  ./bin/aggressor bundle.cna -v -i "run args"
+
+  # Pass trailing command line arguments to the script inside the @ARGV array
+  ./bin/aggressor bundle.cna -i "whoami" -- arg1 arg2
+  ```
 
 ### 7. Performance Benchmarking Tool (`bench_slp`)
 The `bench_slp` runs standard performance tests on the SlpVM core.

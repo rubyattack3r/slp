@@ -208,17 +208,17 @@ static SlpValue val_berror(SlpVM *vm, SlpValue *args, int argc, void *ud) {
 }
 
 static SlpValue val_beacon_command_register(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    (void)ud;
+    REPLState *state = (REPLState *)ud;
     if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
         const char *name = SLP_AS_STRING(args[0])->chars;
-        printf("[+] Registered command: %s\n", name);
+        if (state->verbosity >= 1) printf("[+] Registered command: %s\n", name);
 
         int64_t addr = slp_vm_ffi_get_long(vm, 255);
-        AggressorState *state = (AggressorState *)(uintptr_t)addr;
-        if (state) {
+        AggressorState *ag_state = (AggressorState *)(uintptr_t)addr;
+        if (ag_state) {
             const char *description = (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) ? SLP_AS_STRING(args[1])->chars : "";
             const char *help = (argc >= 3 && SLP_IS_OBJ(args[2]) && SLP_OBJ_TYPE(args[2]) == SLP_OBJ_STRING) ? SLP_AS_STRING(args[2])->chars : "";
-            aggressor_register_command(state, name, description, help);
+            aggressor_register_command(ag_state, name, description, help);
         }
     }
     return SLP_NULL_VAL;
@@ -880,7 +880,10 @@ int main(int argc, char **argv) {
     aggressor_set_bridge_ops(vm, &bridge_ops);
 
     /* Load the script */
-    printf("[*] Loading script: %s...\n", script_file);
+    if (global_repl_state.verbosity >= 1 || (!execute_cmd && !beacon_cmd)) {
+        printf("[*] Loading script: %s...\n", script_file);
+    }
+    
     char *source = utils_read_file(script_file, NULL);
     if (!source) {
         fprintf(stderr, "Could not open file: %s\n", script_file);
@@ -898,7 +901,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    printf("[+] Script loaded successfully.\n");
+    if (global_repl_state.verbosity >= 1 || (!execute_cmd && !beacon_cmd)) {
+        printf("[+] Script loaded successfully.\n");
+    }
 
     if (execute_cmd || beacon_cmd) {
         if (beacon_cmd) {
