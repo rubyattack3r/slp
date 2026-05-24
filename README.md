@@ -93,19 +93,15 @@ The `cna_bundler` consolidates complex, multi-project Cobalt Strike Aggressor Sc
 
 ### 5. Dry-Run Script Validator (`cna_validator`)
 The `cna_validator` performs dry-run syntax and semantic simulation of a consolidated `.cna` bundle.
-- **How It Works**: It spins up a sandboxed SlpVM, registers all Cobalt Strike Aggressor native FFI hooks via `libaggressor`, simulates dry-run execution, verifies that referenced payloads (like BOF `.o` files) exist on disk, intercepts unknown structures safely, and compiles reports.
+- **How It Works**: It spins up a sandboxed SlpVM, registers all Cobalt Strike Aggressor native FFI hooks via `libaggressor`, simulates dry-run execution, verifies that referenced payloads (like BOF `.o` files) exist on disk, and reports validation outcomes safely.
 - **Build**:
   ```bash
   make cna_validator
   ```
 - **Usage**:
   ```bash
-  ./bin/cna_validator <bundle.cna> [--format <text|json|junit>]
+  ./bin/cna_validator <bundle.cna>
   ```
-  - `--format`:
-    - `text` (default): Colored human-readable report.
-    - `json`: Machine-parseable JSON object for CI/CD assertions.
-    - `junit`: JUnit XML report format for dashboard ingestion.
 
 ### 6. Interactive Aggressor REPL (`aggressor`)
 The `aggressor` tool is an interactive shell and Cobalt Strike beacon emulation console.
