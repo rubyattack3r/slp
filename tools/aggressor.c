@@ -25,6 +25,11 @@
  * REPL State & Structs
  * ----------------------------------------------------------------------- */
 
+typedef enum {
+    REPL_MODE_AGGRESSOR,
+    REPL_MODE_BEACON
+} REPLMode;
+
 typedef struct {
     char name[128];
     SlpObjClosure *closure;
@@ -34,9 +39,13 @@ typedef struct {
 #define MAX_OPEN_FILES 32
 
 typedef struct {
+    REPLMode mode;
+    char current_beacon_id[64];
     char current_alias[128];
     FILE *open_files[MAX_OPEN_FILES];
     char script_dir[512];
+    SlpVM *vm;
+    AggressorState *ag_state;
 } REPLState;
 
 static AliasRecord alias_registry[MAX_ALIASES];
@@ -406,41 +415,327 @@ static SlpValue repl_fallback(SlpVM *vm, const char *func_name,
     return SLP_NULL_VAL;
 }
 
+// Simple balance checker for multi-line REPL
+static int check_balance(const char *str, int *braces, int *parens, int *brackets) {
+    int in_string = 0;
+    int in_comment = 0;
+    for (int i = 0; str[i]; i++) {
+        if (in_comment) {
+            if (str[i] == '\n') in_comment = 0;
+            continue;
+        }
+        if (in_string) {
+            if (str[i] == '\\' && str[i+1] != '\0') i++; // skip escaped
+            else if (str[i] == '"') in_string = 0;
+            continue;
+        }
+        if (str[i] == '"') {
+            in_string = 1;
+            continue;
+        }
+        if (str[i] == '/' && str[i+1] == '/') {
+            in_comment = 1;
+            i++;
+            continue;
+        }
+        if (str[i] == '{') (*braces)++;
+        else if (str[i] == '}') (*braces)--;
+        else if (str[i] == '(') (*parens)++;
+        else if (str[i] == ')') (*parens)--;
+        else if (str[i] == '[') (*brackets)++;
+        else if (str[i] == ']') (*brackets)--;
+    }
+    return in_string;
+}
+
+static void pry_print_value(SlpValue value) {
+    if (SLP_IS_NULL(value)) {
+        printf("\x1b[36m$null\x1b[0m");
+    } else if (SLP_IS_BOOL(value)) {
+        printf("\x1b[36m%s\x1b[0m", SLP_AS_BOOL(value) ? "true" : "false");
+    } else if (SLP_IS_NUM(value)) {
+        printf("\x1b[33m%g\x1b[0m", SLP_AS_NUM(value));
+    } else if (SLP_IS_OBJ(value)) {
+        switch (SLP_OBJ_TYPE(value)) {
+            case SLP_OBJ_STRING:
+                printf("\x1b[32m\"%s\"\x1b[0m", SLP_AS_STRING(value)->chars);
+                break;
+            case SLP_OBJ_LONG:
+                printf("\x1b[33m%lldL\x1b[0m", SLP_AS_LONG(value)->value);
+                break;
+            case SLP_OBJ_FUNCTION:
+                printf("\x1b[35m[function]\x1b[0m");
+                break;
+            case SLP_OBJ_CLOSURE:
+                printf("\x1b[35m[closure]\x1b[0m");
+                break;
+            case SLP_OBJ_NATIVE:
+                printf("\x1b[35m[native]\x1b[0m");
+                break;
+            case SLP_OBJ_ARRAY: {
+                SlpObjArray *arr = SLP_AS_ARRAY(value);
+                printf("\x1b[1m@(\x1b[0m");
+                for (int i = 0; i < arr->count; i++) {
+                    pry_print_value(arr->elements[i]);
+                    if (i < arr->count - 1) printf("\x1b[1m, \x1b[0m");
+                }
+                printf("\x1b[1m)\x1b[0m");
+                break;
+            }
+            case SLP_OBJ_HASH: {
+                SlpObjHash *hash = SLP_AS_HASH(value);
+                printf("\x1b[1m%%(\x1b[0m");
+                bool first = true;
+                for (int i = 0; i < hash->capacity; i++) {
+                    if (!SLP_IS_NULL(hash->entries[i].key) && !SLP_IS_TRUE(hash->entries[i].value)) {
+                        if (!first) printf("\x1b[1m, \x1b[0m");
+                        pry_print_value(hash->entries[i].key);
+                        printf(" \x1b[1m=>\x1b[0m ");
+                        pry_print_value(hash->entries[i].value);
+                        first = false;
+                    }
+                }
+                printf("\x1b[1m)\x1b[0m");
+                break;
+            }
+            default:
+                printf("\x1b[35m[object]\x1b[0m");
+                break;
+        }
+    }
+}
+
 /* -----------------------------------------------------------------------
  * Autocomplete
  * ----------------------------------------------------------------------- */
+
+static char *hints(const char *buf, const char **ansi1, const char **ansi2) {
+    *ansi1 = "\033[90m";
+    *ansi2 = "\033[39m";
+
+    int len = strlen(buf);
+    if (len == 0 || strchr(buf, ' ') != NULL) {
+        return NULL;
+    }
+
+    if (global_repl_state.mode == REPL_MODE_BEACON) {
+        // Beacon Console Mode hints
+        for (int i = 0; i < alias_count; i++) {
+            if (strncmp(buf, alias_registry[i].name, len) == 0) {
+                return alias_registry[i].name + len;
+            }
+        }
+
+        const char *builtins[] = {"back", "setbeacon", "exit", "quit"};
+        for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
+            if (strncmp(buf, builtins[i], len) == 0) {
+                return (char *)(builtins[i] + len);
+            }
+        }
+    } else {
+        // Aggressor Mode hints
+        const char *sleep_keywords[] = {
+            "println", "size", "array", "keys", "typeof", "remove", "push", "pop",
+            "if", "else", "while", "for", "foreach", "return", "break", "continue",
+            "sub", "alias", "try", "catch", "throw", "true", "false", "null",
+            "interact", "trigger", "setbeacon", "exit", "quit"
+        };
+        for (size_t i = 0; i < sizeof(sleep_keywords) / sizeof(sleep_keywords[0]); i++) {
+            if (strncmp(buf, sleep_keywords[i], len) == 0) {
+                return (char *)(sleep_keywords[i] + len);
+            }
+        }
+    }
+
+    return NULL;
+}
 
 static void completion(const char *buf, int pos, bestlineCompletions *lc) {
     int start = pos;
     while (start > 0 && buf[start - 1] != ' ') start--;
     int word_len = pos - start;
-    if (word_len == 0) return;
 
-    for (int i = 0; i < alias_count; i++) {
-        if (strncmp(buf + start, alias_registry[i].name, word_len) == 0) {
-            size_t new_len = start + strlen(alias_registry[i].name) + strlen(buf + pos) + 1;
-            char *new_buf = malloc(new_len);
-            if (new_buf) {
-                strncpy(new_buf, buf, start);
-                strcpy(new_buf + start, alias_registry[i].name);
-                strcpy(new_buf + start + strlen(alias_registry[i].name), buf + pos);
-                bestlineAddCompletion(lc, new_buf);
-                free(new_buf);
-            }
+    // Find the first word in the buffer (the command/expression)
+    char first_word[128] = {0};
+    int first_word_len = 0;
+    while (buf[first_word_len] && buf[first_word_len] != ' ' && first_word_len < (int)sizeof(first_word) - 1) {
+        first_word[first_word_len] = buf[first_word_len];
+        first_word_len++;
+    }
+
+    bool is_first_word = true;
+    for (int i = 0; i < start; i++) {
+        if (buf[i] != ' ') {
+            is_first_word = false;
+            break;
         }
     }
 
-    const char *builtins[] = {"trigger", "setbeacon", "exit", "quit"};
-    for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
-        if (strncmp(buf + start, builtins[i], word_len) == 0) {
-            size_t new_len = start + strlen(builtins[i]) + strlen(buf + pos) + 1;
-            char *new_buf = malloc(new_len);
-            if (new_buf) {
-                strncpy(new_buf, buf, start);
-                strcpy(new_buf + start, builtins[i]);
-                strcpy(new_buf + start + strlen(builtins[i]), buf + pos);
-                bestlineAddCompletion(lc, new_buf);
-                free(new_buf);
+    if (global_repl_state.mode == REPL_MODE_BEACON) {
+        // Beacon Console Mode completions
+        if (is_first_word) {
+            if (word_len == 0) return;
+
+            // Complete aliases (which are the beacon commands)
+            for (int i = 0; i < alias_count; i++) {
+                if (strncmp(buf + start, alias_registry[i].name, word_len) == 0) {
+                    size_t new_len = start + strlen(alias_registry[i].name) + strlen(buf + pos) + 1;
+                    char *new_buf = malloc(new_len);
+                    if (new_buf) {
+                        strncpy(new_buf, buf, start);
+                        strcpy(new_buf + start, alias_registry[i].name);
+                        strcpy(new_buf + start + strlen(alias_registry[i].name), buf + pos);
+                        bestlineAddCompletion(lc, new_buf);
+                        free(new_buf);
+                    }
+                }
+            }
+
+            // Complete builtins
+            const char *builtins[] = {"back", "setbeacon", "exit", "quit"};
+            for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
+                if (strncmp(buf + start, builtins[i], word_len) == 0) {
+                    size_t new_len = start + strlen(builtins[i]) + strlen(buf + pos) + 1;
+                    char *new_buf = malloc(new_len);
+                    if (new_buf) {
+                        strncpy(new_buf, buf, start);
+                        strcpy(new_buf + start, builtins[i]);
+                        strcpy(new_buf + start + strlen(builtins[i]), buf + pos);
+                        bestlineAddCompletion(lc, new_buf);
+                        free(new_buf);
+                    }
+                }
+            }
+        } else {
+            // Completing arguments in Beacon Mode
+            if (strcmp(first_word, "setbeacon") == 0) {
+                int arg_count = 0;
+                bool in_word = false;
+                int idx = first_word_len;
+                while (idx < start) {
+                    if (buf[idx] != ' ') {
+                        if (!in_word) {
+                            in_word = true;
+                            arg_count++;
+                        }
+                    } else {
+                        in_word = false;
+                    }
+                    idx++;
+                }
+
+                // setbeacon <key> <value>
+                // If only 1 arg before us, complete properties
+                if (arg_count == 1) {
+                    const char *keys[] = {"computer", "user", "isadmin", "barch", "pid", "os", "host", "internal", "external"};
+                    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+                        if (word_len == 0 || strncmp(buf + start, keys[i], word_len) == 0) {
+                            size_t new_len = start + strlen(keys[i]) + strlen(buf + pos) + 1;
+                            char *new_buf = malloc(new_len);
+                            if (new_buf) {
+                                strncpy(new_buf, buf, start);
+                                strcpy(new_buf + start, keys[i]);
+                                strcpy(new_buf + start + strlen(keys[i]), buf + pos);
+                                bestlineAddCompletion(lc, new_buf);
+                                free(new_buf);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Aggressor/Sleep Mode completions
+        if (is_first_word) {
+            if (word_len == 0) return;
+
+            // Complete Sleep keywords & built-in functions
+            const char *sleep_keywords[] = {
+                "println", "size", "array", "keys", "typeof", "remove", "push", "pop",
+                "if", "else", "while", "for", "foreach", "return", "break", "continue",
+                "sub", "alias", "try", "catch", "throw", "true", "false", "null",
+                "interact", "trigger", "setbeacon", "exit", "quit"
+            };
+            for (size_t i = 0; i < sizeof(sleep_keywords) / sizeof(sleep_keywords[0]); i++) {
+                if (strncmp(buf + start, sleep_keywords[i], word_len) == 0) {
+                    size_t new_len = start + strlen(sleep_keywords[i]) + strlen(buf + pos) + 1;
+                    char *new_buf = malloc(new_len);
+                    if (new_buf) {
+                        strncpy(new_buf, buf, start);
+                        strcpy(new_buf + start, sleep_keywords[i]);
+                        strcpy(new_buf + start + strlen(sleep_keywords[i]), buf + pos);
+                        bestlineAddCompletion(lc, new_buf);
+                        free(new_buf);
+                    }
+                }
+            }
+        } else {
+            // Completing arguments in Aggressor Mode
+            if (strcmp(first_word, "trigger") == 0) {
+                int arg_count = 0;
+                bool in_word = false;
+                int idx = first_word_len;
+                while (idx < start) {
+                    if (buf[idx] != ' ') {
+                        if (!in_word) {
+                            in_word = true;
+                            arg_count++;
+                        }
+                    } else {
+                        in_word = false;
+                    }
+                    idx++;
+                }
+
+                if (arg_count <= 1) {
+                    for (int i = 0; i < event_count; i++) {
+                        if (word_len == 0 || strncmp(buf + start, event_registry[i].event_name, word_len) == 0) {
+                            size_t new_len = start + strlen(event_registry[i].event_name) + strlen(buf + pos) + 1;
+                            char *new_buf = malloc(new_len);
+                            if (new_buf) {
+                                strncpy(new_buf, buf, start);
+                                strcpy(new_buf + start, event_registry[i].event_name);
+                                strcpy(new_buf + start + strlen(event_registry[i].event_name), buf + pos);
+                                bestlineAddCompletion(lc, new_buf);
+                                free(new_buf);
+                            }
+                        }
+                    }
+                }
+            } else if (strcmp(first_word, "setbeacon") == 0) {
+                int arg_count = 0;
+                bool in_word = false;
+                int idx = first_word_len;
+                while (idx < start) {
+                    if (buf[idx] != ' ') {
+                        if (!in_word) {
+                            in_word = true;
+                            arg_count++;
+                        }
+                    } else {
+                        in_word = false;
+                    }
+                    idx++;
+                }
+
+                // setbeacon <id> <key> <value>
+                // Completing key (2nd arg, arg_count == 1 after id is fully typed)
+                if (arg_count == 1) {
+                    const char *keys[] = {"computer", "user", "isadmin", "barch", "pid", "os", "host", "internal", "external"};
+                    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+                        if (word_len == 0 || strncmp(buf + start, keys[i], word_len) == 0) {
+                            size_t new_len = start + strlen(keys[i]) + strlen(buf + pos) + 1;
+                            char *new_buf = malloc(new_len);
+                            if (new_buf) {
+                                strncpy(new_buf, buf, start);
+                                strcpy(new_buf + start, keys[i]);
+                                strcpy(new_buf + start + strlen(keys[i]), buf + pos);
+                                bestlineAddCompletion(lc, new_buf);
+                                free(new_buf);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -482,6 +777,10 @@ int main(int argc, char **argv) {
         .user_data = &global_repl_state,
     };
     AggressorState *ag_state = aggressor_init(vm, &cfg);
+
+    global_repl_state.mode = REPL_MODE_AGGRESSOR;
+    global_repl_state.vm = vm;
+    global_repl_state.ag_state = ag_state;
 
     /* Register/Override standard functions */
     slp_vm_register_native(vm, "println", val_println);
@@ -538,10 +837,12 @@ int main(int argc, char **argv) {
 
     printf("[+] Script loaded successfully.\n");
     printf("\n\x1b[32m=== Aggressor REPL ===\x1b[0m\n");
-    printf("Type an alias to execute (e.g. 'sc_config arg1 arg2'). Type 'exit' to quit.\n");
+    printf("Base mode: Aggressor/Sleep script evaluation. Type 'exit' to quit.\n");
+    printf("To emulate a beacon console, type: interact <beacon_id>\n");
     printf("Registered aliases: %d, events: %d\n\n", alias_count, event_count);
 
     bestlineSetCompletionCallback(completion);
+    bestlineSetHintsCallback(hints);
 
     /* Set up history path cleanly in user's home directory */
     char history_path[1024];
@@ -553,112 +854,247 @@ int main(int argc, char **argv) {
     }
     bestlineHistoryLoad(history_path);
 
+    char *buffer = NULL;
+    size_t buf_len = 0;
+
     while (1) {
-        char *line = bestline("aggressor> ");
-        if (!line) break;
+        if (global_repl_state.mode == REPL_MODE_BEACON) {
+            char prompt[128];
+            snprintf(prompt, sizeof(prompt), "beacon %s> ", global_repl_state.current_beacon_id);
+            char *line = bestline(prompt);
+            if (!line) break;
 
-        if (strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0) {
-            free(line);
-            break;
-        }
+            if (line[0] != '\0') {
+                bestlineHistoryAdd(line);
+                bestlineHistorySave(history_path);
 
-        if (line[0] != '\0') {
-            bestlineHistoryAdd(line);
-            bestlineHistorySave(history_path);
-
-            char *cmd = strdup(line);
-            char *args_str = "";
-            char *space = strchr(cmd, ' ');
-            if (space) {
-                *space = '\0';
-                args_str = space + 1;
-            }
-
-            if (strcmp(cmd, "trigger") == 0) {
-                char *event_cmd = strdup(args_str);
-                char *event_args = "";
-                char *event_space = strchr(event_cmd, ' ');
-                if (event_space) {
-                    *event_space = '\0';
-                    event_args = event_space + 1;
+                char *cmd = strdup(line);
+                char *args_str = "";
+                char *space = strchr(cmd, ' ');
+                if (space) {
+                    *space = '\0';
+                    args_str = space + 1;
                 }
 
-                int found = 0;
-                for (int i = 0; i < event_count; i++) {
-                    if (strcmp(event_registry[i].event_name, event_cmd) == 0) {
-                        found = 1;
-                        char eval_buf[4096];
-                        int len = snprintf(eval_buf, sizeof(eval_buf), "__event_%s(", event_cmd);
-                        char *args_copy = strdup(event_args);
-                        char *token = strtok(args_copy, " \t\r\n");
-                        int arg_idx = 0;
-                        while (token) {
-                            int written = snprintf(eval_buf + len, sizeof(eval_buf) - len, "%s'%s'", (arg_idx > 0 ? ", " : ""), token);
-                            if (written > 0) len += written;
-                            arg_idx++;
-                            token = strtok(NULL, " \t\r\n");
-                        }
-                        free(args_copy);
-                        snprintf(eval_buf + len, sizeof(eval_buf) - len, ");");
-                        
-                        printf("[*] Triggering event '%s'...\n", event_cmd);
+                if (strcmp(cmd, "back") == 0) {
+                    global_repl_state.mode = REPL_MODE_AGGRESSOR;
+                    printf("[*] Returning to Aggressor/Sleep REPL.\n");
+                } else if (strcmp(cmd, "exit") == 0 || strcmp(cmd, "quit") == 0) {
+                    free(cmd);
+                    free(line);
+                    break;
+                } else if (strcmp(cmd, "setbeacon") == 0) {
+                    char *args_copy = strdup(args_str);
+                    char *key = strtok(args_copy, " \t\r\n");
+                    char *value = strtok(NULL, "\r\n");
+                    if (key && value) {
+                        while (*value == ' ' || *value == '\t') value++;
+                        char eval_buf[1024];
+                        snprintf(eval_buf, sizeof(eval_buf), "beacon_info_set('%s', '%s', '%s');", global_repl_state.current_beacon_id, key, value);
                         vm->repl_mode = true;
                         slp_vm_interpret(vm, eval_buf);
                         vm->repl_mode = false;
-                        break;
+                        printf("[+] Set beacon %s property '%s' = '%s'\n", global_repl_state.current_beacon_id, key, value);
+                    } else {
+                        printf("Usage: setbeacon <key> <value>\n");
                     }
-                }
-                if (!found) printf("[-] Event hook '%s' not registered.\n", event_cmd);
-                free(event_cmd);
-            } else if (strcmp(cmd, "setbeacon") == 0) {
-                char *args_copy = strdup(args_str);
-                char *id = strtok(args_copy, " \t\r\n");
-                char *key = strtok(NULL, " \t\r\n");
-                char *value = strtok(NULL, "\r\n");
-                
-                if (id && key && value) {
-                    while (*value == ' ' || *value == '\t') value++;
-                    
-                    char eval_buf[1024];
-                    snprintf(eval_buf, sizeof(eval_buf), "beacon_info_set('%s', '%s', '%s');", id, key, value);
-                    
-                    vm->repl_mode = true;
-                    slp_vm_interpret(vm, eval_buf);
-                    vm->repl_mode = false;
-                    printf("[+] Set beacon %s property '%s' = '%s'\n", id, key, value);
+                    free(args_copy);
                 } else {
-                    printf("Usage: setbeacon <id> <key> <value>\n");
-                }
-                free(args_copy);
-            } else {
-                int found = 0;
-                for (int i = 0; i < alias_count; i++) {
-                    if (strcmp(alias_registry[i].name, cmd) == 0) {
-                        found = 1;
-                        char eval_buf[4096];
-                        int len = snprintf(eval_buf, sizeof(eval_buf), "__alias_%s('1'", cmd);
-                        char *args_copy = strdup(args_str);
-                        char *token = strtok(args_copy, " \t\r\n");
-                        while (token) {
-                            int written = snprintf(eval_buf + len, sizeof(eval_buf) - len, ", '%s'", token);
-                            if (written > 0) len += written;
-                            token = strtok(NULL, " \t\r\n");
+                    int found = 0;
+                    for (int i = 0; i < alias_count; i++) {
+                        if (strcmp(alias_registry[i].name, cmd) == 0) {
+                            found = 1;
+                            char eval_buf[4096];
+                            int len = snprintf(eval_buf, sizeof(eval_buf), "__alias_%s('%s'", cmd, global_repl_state.current_beacon_id);
+                            char *args_copy = strdup(args_str);
+                            char *token = strtok(args_copy, " \t\r\n");
+                            while (token) {
+                                int written = snprintf(eval_buf + len, sizeof(eval_buf) - len, ", '%s'", token);
+                                if (written > 0) len += written;
+                                token = strtok(NULL, " \t\r\n");
+                            }
+                            free(args_copy);
+                            snprintf(eval_buf + len, sizeof(eval_buf) - len, ");");
+
+                            vm->repl_mode = true;
+                            slp_vm_interpret(vm, eval_buf);
+                            vm->repl_mode = false;
+                            break;
                         }
-                        free(args_copy);
-                        snprintf(eval_buf + len, sizeof(eval_buf) - len, ");");
-                        
+                    }
+                    if (!found) printf("[-] Beacon command '%s' not registered as an alias.\n", cmd);
+                }
+                free(cmd);
+            }
+            free(line);
+        } else {
+            // Aggressor/Sleep Mode
+            int braces = 0, parens = 0, brackets = 0;
+            int in_string = 0;
+            if (buffer) {
+                in_string = check_balance(buffer, &braces, &parens, &brackets);
+            }
+
+            const char *prompt = (braces > 0 || parens > 0 || brackets > 0 || in_string) ? "... " : "aggressor> ";
+            char *line = bestline(prompt);
+            if (!line) {
+                if (buffer) { free(buffer); buffer = NULL; buf_len = 0; printf("\n"); continue; }
+                break;
+            }
+
+            // Check single line commands before multi-line balancing
+            if (!buffer && (strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0)) {
+                free(line);
+                break;
+            }
+
+            // Check if it's interact command
+            if (!buffer && strncmp(line, "interact ", 9) == 0) {
+                const char *id = line + 9;
+                while (*id == ' ' || *id == '\t') id++;
+                if (*id != '\0') {
+                    // Extract ID
+                    char id_buf[64] = {0};
+                    int i = 0;
+                    while (id[i] && id[i] != ' ' && id[i] != '\t' && id[i] != '\n' && id[i] != '\r' && i < 63) {
+                        id_buf[i] = id[i];
+                        i++;
+                    }
+                    strcpy(global_repl_state.current_beacon_id, id_buf);
+                    global_repl_state.mode = REPL_MODE_BEACON;
+                    
+                    // Automatically generate mock beacon with realistic defaults if it doesn't exist
+                    aggressor_ensure_beacon(global_repl_state.ag_state, id_buf);
+                    
+                    printf("[*] Interacting with beacon %s. Type 'back' to return.\n", id_buf);
+                } else {
+                    printf("Usage: interact <beacon_id>\n");
+                }
+                free(line);
+                continue;
+            }
+
+            // Check if it's trigger or setbeacon command directly in aggressor prompt
+            if (!buffer && (strncmp(line, "trigger ", 8) == 0 || strncmp(line, "setbeacon ", 10) == 0)) {
+                // We handle trigger or setbeacon directly
+                char *cmd = strdup(line);
+                char *args_str = "";
+                char *space = strchr(cmd, ' ');
+                if (space) {
+                    *space = '\0';
+                    args_str = space + 1;
+                }
+
+                if (strcmp(cmd, "trigger") == 0) {
+                    char *event_cmd = strdup(args_str);
+                    char *event_args = "";
+                    char *event_space = strchr(event_cmd, ' ');
+                    if (event_space) {
+                        *event_space = '\0';
+                        event_args = event_space + 1;
+                    }
+
+                    int found = 0;
+                    for (int i = 0; i < event_count; i++) {
+                        if (strcmp(event_registry[i].event_name, event_cmd) == 0) {
+                            found = 1;
+                            char eval_buf[4096];
+                            int len = snprintf(eval_buf, sizeof(eval_buf), "__event_%s(", event_cmd);
+                            char *args_copy = strdup(event_args);
+                            char *token = strtok(args_copy, " \t\r\n");
+                            int arg_idx = 0;
+                            while (token) {
+                                int written = snprintf(eval_buf + len, sizeof(eval_buf) - len, "%s'%s'", (arg_idx > 0 ? ", " : ""), token);
+                                if (written > 0) len += written;
+                                arg_idx++;
+                                token = strtok(NULL, " \t\r\n");
+                            }
+                            free(args_copy);
+                            snprintf(eval_buf + len, sizeof(eval_buf) - len, ");");
+
+                            printf("[*] Triggering event '%s'...\n", event_cmd);
+                            vm->repl_mode = true;
+                            slp_vm_interpret(vm, eval_buf);
+                            vm->repl_mode = false;
+                            break;
+                        }
+                    }
+                    if (!found) printf("[-] Event hook '%s' not registered.\n", event_cmd);
+                    free(event_cmd);
+                } else if (strcmp(cmd, "setbeacon") == 0) {
+                    char *args_copy = strdup(args_str);
+                    char *id = strtok(args_copy, " \t\r\n");
+                    char *key = strtok(NULL, " \t\r\n");
+                    char *value = strtok(NULL, "\r\n");
+                    if (id && key && value) {
+                        while (*value == ' ' || *value == '\t') value++;
+                        char eval_buf[1024];
+                        snprintf(eval_buf, sizeof(eval_buf), "beacon_info_set('%s', '%s', '%s');", id, key, value);
                         vm->repl_mode = true;
                         slp_vm_interpret(vm, eval_buf);
                         vm->repl_mode = false;
-                        break;
+                        printf("[+] Set beacon %s property '%s' = '%s'\n", id, key, value);
+                    } else {
+                        printf("Usage: setbeacon <id> <key> <value>\n");
                     }
+                    free(args_copy);
                 }
-                if (!found) printf("[-] Alias '%s' not found.\n", cmd);
+                free(cmd);
+                free(line);
+                continue;
             }
-            free(cmd);
+
+            if (line[0] != '\0') {
+                size_t line_len = strlen(line);
+                if (!buffer) {
+                    buffer = malloc(line_len + 2);
+                    strcpy(buffer, line);
+                    buf_len = line_len;
+                } else {
+                    buffer = realloc(buffer, buf_len + line_len + 2);
+                    buffer[buf_len] = '\n';
+                    strcpy(buffer + buf_len + 1, line);
+                    buf_len += line_len + 1;
+                }
+            } else if (buffer) {
+                buffer[buf_len] = '\n';
+                buffer[buf_len+1] = '\0';
+                buf_len++;
+            }
+            free(line);
+
+            if (buffer) {
+                braces = 0; parens = 0; brackets = 0;
+                in_string = check_balance(buffer, &braces, &parens, &brackets);
+                if (braces <= 0 && parens <= 0 && brackets <= 0 && !in_string) {
+                    bestlineHistoryAdd(buffer);
+                    bestlineHistorySave(history_path);
+
+                    if (buffer[buf_len - 1] != ';' && buffer[buf_len - 1] != '}') {
+                        buffer = realloc(buffer, buf_len + 2);
+                        buffer[buf_len] = ';';
+                        buffer[buf_len + 1] = '\0';
+                    }
+
+                    vm->repl_mode = true;
+                    SlpResult r = slp_vm_interpret(vm, buffer);
+                    vm->repl_mode = false;
+
+                    if (r == SLP_OK) {
+                        SlpValue result = slp_vm_pop(vm);
+                        printf("\x1b[90m=>\x1b[0m ");
+                        pry_print_value(result);
+                        printf("\n");
+                    }
+
+                    free(buffer);
+                    buffer = NULL;
+                    buf_len = 0;
+                }
+            }
         }
-        free(line);
     }
+    if (buffer) free(buffer);
 
     aggressor_deinit(ag_state);
     slp_vm_free(vm);

@@ -102,6 +102,10 @@ static void mark_roots(SlpVM *vm) {
     if (vm->natives)
         slp_gc_mark_obj(vm, (SlpObj*)vm->natives);
 
+    for (int i = 0; i < 256; i++) {
+        slp_gc_mark_value(vm, vm->ffi_slots[i]);
+    }
+
     SlpBridgeType *bt = vm->bridge_types;
     while (bt) {
         bt = bt->next;

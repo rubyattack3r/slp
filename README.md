@@ -13,112 +13,130 @@ This project is a C implementation of a parser, lexer, and eventually a VM for t
 - `src/`: Core implementation files for the Lexer, Parser, and VM.
 - `tests/`: Unit tests written in C++ using `doctest.h` to verify the C implementation against the standard test fixtures from the reference implementation.
 
-## Building and Usage
+## Building and Core Usage
 
-You can build the interactive REPL (Read-Eval-Print Loop) binary using `make`:
-
-```bash
-make slp
-```
-
-This will produce a `slp` binary in the `bin/` directory. You can start the interactive REPL:
+You can build all the native core C tools and Aggressor tooling using `make`:
 
 ```bash
-./bin/slp
+make tools
 ```
 
-Or execute a script directly:
-
-```bash
-./bin/slp path/to/script.sl
-```
+This will compile and output all compiled binaries in the `bin/` directory.
 
 ---
 
-## CNA Tooling Suite
+## Detailed Tool Suite Guide
 
-This repository contains robust tools specifically built for bundling, renaming, and dry-run validating multi-project Cobalt Strike Aggressor Scripts (CNA).
+The project contains a robust and highly specialized suite of native C-based tools for compiling, formatting, disassembling, bundling, validating, and interacting with Sleep and Aggressor Scripts.
 
-### 1. CNA Bundler (`cna_bundler`)
+### 1. Main Script Interpreter & REPL (`slp`)
+The `slp` tool is the primary CLI runner and interactive shell for the Sleep programming language.
+- **How It Works**: It reads source code, runs the custom zero-dependency Lexer and LALR-like Parser to generate an Abstract Syntax Tree (AST), compiles the AST into dynamic VM bytecode, and executes it inside the stack-based SlpVM.
+- **Build**:
+  ```bash
+  make slp
+  ```
+- **Interactive REPL**:
+  ```bash
+  ./bin/slp
+  ```
+- **Execute Script**:
+  ```bash
+  ./bin/slp path/to/script.sl
+  ```
 
-The `cna_bundler` tool processes a directory of CNA projects, recursively resolves and inlines nested child script includes (such as `include("modules/child.cna")` or `include(script_resource("child.cna"))`), sanitizes internal subroutines and variables per-project using safe prefixes, detects alias name collisions across projects, and applies config-driven renaming to resolve conflicts.
+### 2. AST-Based Code Formatter (`slp_fmt`)
+The `slp_fmt` tool parses a Sleep source script, normalizes its internal structure, and formats it cleanly back into formatted Sleep syntax.
+- **How It Works**: It reads the input code, parses it into an AST, and passes the AST through a dedicated formatter (`slp_ast_format`) to reconstruct the source text with clean indentation and spacing.
+- **Build**:
+  ```bash
+  make slp_fmt
+  ```
+- **Usage Options**:
+  - Print formatted script to standard output:
+    ```bash
+    ./bin/slp_fmt path/to/script.sl
+    ```
+  - Format a script and write it back in-place:
+    ```bash
+    ./bin/slp_fmt -w path/to/script.sl
+    ```
+  - Format a script and write it to a specific output file:
+    ```bash
+    ./bin/slp_fmt -o formatted_output.sl path/to/script.sl
+    ```
 
-#### Build
-```bash
-make cna_bundler
-```
-Produces `bin/cna_bundler`.
+### 3. Bytecode Disassembler (`slpd`)
+The `slpd` tool is a debugger and VM inspector that disassembles compiled Sleep code.
+- **How It Works**: It parses and compiles source code into VM bytecode chunks, then runs `slp_disasm_chunk` recursively across all scopes and functions to print the exact SlpVM instructions (e.g. `OP_LOAD_VAL`, `OP_CALL`, `OP_RETURN`) in a readable trace format.
+- **Build**:
+  ```bash
+  make slpd
+  ```
+- **Usage**:
+  ```bash
+  ./bin/slpd path/to/script.sl
+  ```
 
-#### Usage
-```bash
-./bin/cna_bundler <projects-dir> [-o <output.cna>] [--config <config-file>]
-```
-- `<projects-dir>`: Directory containing subdirectory projects (each with a `.cna` entrypoint).
-- `-o`: File path to write the bundled single `.cna` output.
-- `--config`: Config file specifying custom alias renames to resolve collisions.
+### 4. Multi-Project CNA Bundler (`cna_bundler`)
+The `cna_bundler` consolidates complex, multi-project Cobalt Strike Aggressor Scripts (CNA) into a single, cohesive bundle.
+- **How It Works**: It processes a target project directory recursively, inlines child scripts resolved through `include()` or `script_resource()` dynamically, sanitizes variables and subroutines to avoid cross-project namespace pollution, detects global alias name collisions, and applies conflict renaming configs.
+- **Build**:
+  ```bash
+  make cna_bundler
+  ```
+- **Usage**:
+  ```bash
+  ./bin/cna_bundler <projects-dir> -o <output.cna> [--config <config-file>]
+  ```
+  - `--config`: Config file specifying mapping rules to resolve collisions (format: `ProjectName:old_alias=new_alias`).
 
-#### Rename Config Format (`rename_config.txt`)
-To resolve collisions, write rules matching `ProjectName:old_alias=new_alias`:
-```text
-# Avoid collision on 'whoami'
-CS-ProjectB:whoami=whoami_pb
-```
+### 5. Dry-Run Script Validator (`cna_validator`)
+The `cna_validator` performs dry-run syntax and semantic simulation of a consolidated `.cna` bundle.
+- **How It Works**: It spins up a sandboxed SlpVM, registers all Cobalt Strike Aggressor native FFI hooks via `libaggressor`, simulates dry-run execution, verifies that referenced payloads (like BOF `.o` files) exist on disk, intercepts unknown structures safely, and compiles reports.
+- **Build**:
+  ```bash
+  make cna_validator
+  ```
+- **Usage**:
+  ```bash
+  ./bin/cna_validator <bundle.cna> [--format <text|json|junit>]
+  ```
+  - `--format`:
+    - `text` (default): Colored human-readable report.
+    - `json`: Machine-parseable JSON object for CI/CD assertions.
+    - `junit`: JUnit XML report format for dashboard ingestion.
 
----
+### 6. Interactive Aggressor REPL (`aggressor`)
+The `aggressor` tool is an interactive shell and Cobalt Strike beacon emulation console.
+- **How It Works**: It loads a consolidated CNA script, registers Aggressor functions, and starts a **dual-mode shell** featuring context-aware tab completions and inline greyed-out completions (readline hints):
+  - **Aggressor Mode (Default)**: Direct evaluation of arbitrary Sleep statements, supporting multi-line balanced brackets/braces/parentheses and beautiful, syntax-colored value output.
+  - **Beacon Emulation Mode**: Entered by typing `interact <beacon_id>`. Automatically provisions a realistic mock beacon environment (matching `x64` arch, OS Windows, fake IP/host) and redirects console commands directly to Aggressor script alias invocations.
+- **Build**:
+  ```bash
+  make aggressor
+  ```
+- **Usage**:
+  ```bash
+  ./bin/aggressor <bundle.cna>
+  ```
+  - Type `interact 123` to enter Beacon Console Mode for beacon `123`. The REPL will output:
+    ```text
+    [*] Interacting with beacon 123. Type 'back' to return.
+    ```
+    The prompt changes to `beacon 123> ` and accepts all alias commands directly, emulating Cobalt Strike's console.
+  - Type `back` to return to Aggressor scripting mode.
 
-### 2. CNA Dry-Run Validator (`cna_validator`)
-
-The `cna_validator` parses and executes dry-run simulations of a consolidated `.cna` bundle. It registers mock native Aggressor Script routines (using `libaggressor`), verifies that referenced external files/BOF payloads (e.g. `.o` files) exist on disk via `script_resource()` and `openf()`, and intercepts unknown closures safely.
-
-#### Build
-```bash
-make cna_validator
-```
-Produces `bin/cna_validator`.
-
-#### Usage
-```bash
-./bin/cna_validator <bundle.cna> [--format <text|json|junit>]
-```
-- `<bundle.cna>`: Consolidated script to validate.
-- `--format`: Specify the output reporting format:
-  - `text` (default): Human-readable ANSI-colored CLI summary.
-  - `json`: Machine-parseable JSON validation object (perfect for CI/CD assertions).
-  - `junit`: Standard JUnit XML report, perfect for publishing to CI dashboards.
-
-#### Clean JSON Output Example:
-```json
-{
-  "status": "SUCCESS",
-  "aliases_registered": 139,
-  "aliases_tested": 139,
-  "errors": []
-}
-```
-
----
-
-### 3. Interactive Aggressor REPL (`aggressor`)
-
-The `aggressor` tool is a standalone interactive shell for Aggressor Scripts. It loads a `.cna` bundle or script, registers all registered mock Aggressor Script routines, and provides a REPL interface where you can execute loaded aliases interactively with autocompletion. History logging is disabled for this shell to prevent workspace clutter.
-
-#### Build
-```bash
-make aggressor
-```
-Produces `bin/aggressor`.
-
-#### Usage
-```bash
-./bin/aggressor <bundle.cna>
-```
-Once loaded, type any registered alias with arguments (e.g., `sc_config arg1 arg2`) to execute it. Type `exit` or `quit` to leave.
-
----
-
-### 4. Generic Extension Library (`libaggressor`)
-
-Located in `extensions/aggressor/`, `libaggressor` decouples the core Sleep C engine from Cobalt Strike domain logic. It supports multi-VM co-existence by storing all FFI hooks, overrides, and dispatch state inside a heap-allocated struct associated with each VM instance via FFI slots, completely avoiding single-VM static globals.
+### 7. Performance Benchmarking Tool (`bench_slp`)
+The `bench_slp` runs standard performance tests on the SlpVM core.
+- **Build**:
+  ```bash
+  make bench_slp
+  ```
+- **Usage**:
+  ```bash
+  ./bin/bench_slp
+  ```
 
 ---
 

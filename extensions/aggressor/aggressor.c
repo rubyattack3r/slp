@@ -702,3 +702,46 @@ void aggressor_set_bridge_ops(SlpVM *vm, AggressorBridgeOps *ops) {
     if (ops->popup_handler)
         slp_vm_register_bridge_type(vm, "popup", ops->popup_handler, state->config.user_data);
 }
+
+bool aggressor_beacon_exists(AggressorState *state, const char *id) {
+    if (!state || !id) return false;
+    for (int i = 0; i < state->mock_beacon_count; i++) {
+        int has_id = 0;
+        for (int j = 0; j < state->mock_beacons[i].property_count; j++) {
+            if (strcmp(state->mock_beacons[i].properties[j].key, "id") == 0) {
+                if (strcmp(state->mock_beacons[i].properties[j].value, id) == 0) {
+                    has_id = 1;
+                    break;
+                }
+            }
+        }
+        if (has_id) return true;
+    }
+    return false;
+}
+
+void aggressor_ensure_beacon(AggressorState *state, const char *id) {
+    if (!state || !id) return;
+    if (aggressor_beacon_exists(state, id)) return;
+    if (state->mock_beacon_count >= 32) return;
+
+    MockBeacon *b = &state->mock_beacons[state->mock_beacon_count++];
+    b->property_count = 7;
+    strcpy(b->properties[0].key, "id"); strncpy(b->properties[0].value, id, 255);
+    strcpy(b->properties[1].key, "user"); strcpy(b->properties[1].value, "SYSTEM");
+    
+    char comp_name[64];
+    snprintf(comp_name, sizeof(comp_name), "DESKTOP-%s", id);
+    strcpy(b->properties[2].key, "computer"); strncpy(b->properties[2].value, comp_name, 255);
+    
+    strcpy(b->properties[3].key, "isadmin"); strcpy(b->properties[3].value, "1");
+    strcpy(b->properties[4].key, "barch"); strcpy(b->properties[4].value, "x64");
+    strcpy(b->properties[5].key, "os"); strcpy(b->properties[5].value, "Windows");
+    
+    char host_ip[64];
+    int hash = 0;
+    for (int i = 0; id[i]; i++) hash = hash * 31 + id[i];
+    int octet = (hash < 0 ? -hash : hash) % 254 + 1;
+    snprintf(host_ip, sizeof(host_ip), "10.10.10.%d", octet);
+    strcpy(b->properties[6].key, "host"); strncpy(b->properties[6].value, host_ip, 255);
+}

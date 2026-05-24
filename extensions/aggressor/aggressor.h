@@ -200,6 +200,16 @@ void aggressor_set_bridge_ops(SlpVM *vm, AggressorBridgeOps *ops);
  * ----------------------------------------------------------------------- */
 
 /*
+ * Check if a mock beacon ID exists. Returns true if it exists, false otherwise.
+ */
+bool aggressor_beacon_exists(AggressorState *state, const char *id);
+
+/*
+ * Create a new mock beacon with realistic defaults if it does not already exist.
+ */
+void aggressor_ensure_beacon(AggressorState *state, const char *id);
+
+/*
  * Get the AggressorConfig associated with this VM. Returns NULL if
  * aggressor_init() hasn't been called yet.
  */
