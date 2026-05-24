@@ -167,7 +167,15 @@ static SlpValue val_script_resource(SlpVM *vm, SlpValue *args, int argc, void *u
         return SLP_NULL_VAL;
     SlpObjString *str = SLP_AS_STRING(args[0]);
     char resolved[1024];
-    snprintf(resolved, sizeof(resolved), "%s%s", state->script_dir, str->chars);
+    
+    // Ensure we don't double-slash or miss a slash
+    size_t dir_len = strlen(state->script_dir);
+    if (dir_len > 0 && state->script_dir[dir_len - 1] != '/' && state->script_dir[dir_len - 1] != '\\') {
+        snprintf(resolved, sizeof(resolved), "%s/%s", state->script_dir, str->chars);
+    } else {
+        snprintf(resolved, sizeof(resolved), "%s%s", state->script_dir, str->chars);
+    }
+    
     return SLP_OBJ_VAL(slp_vm_copy_string(vm, resolved, strlen(resolved)));
 }
 
@@ -787,6 +795,7 @@ int main(int argc, char **argv) {
     const char *execute_cmd = NULL;
     const char *interact_id = NULL;
     const char *beacon_cmd = NULL;
+    int arg_start_idx = argc;
 
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
@@ -799,6 +808,13 @@ int main(int argc, char **argv) {
             global_repl_state.verbosity = 1;
         } else if (strcmp(argv[i], "-vv") == 0) {
             global_repl_state.verbosity = 2;
+        } else if (strcmp(argv[i], "--") == 0) {
+            arg_start_idx = i + 1;
+            break;
+        } else {
+            // Unrecognized flags or trailing arguments become script args
+            arg_start_idx = i;
+            break;
         }
     }
     char *dir = utils_get_directory(script_file);
@@ -815,6 +831,15 @@ int main(int argc, char **argv) {
     slp_stdlib_init(vm);
     slp_vm_set_error_fn(vm, repl_error, NULL);
     slp_vm_set_write_fn(vm, repl_write, NULL);
+
+    /* Populate @ARGV */
+    SlpObjArray *argv_array = slp_obj_array_new(&allocator);
+    for (int i = arg_start_idx; i < argc; i++) {
+        SlpObjString *str = slp_vm_copy_string(vm, argv[i], strlen(argv[i]));
+        slp_obj_array_push(&allocator, argv_array, SLP_OBJ_VAL(str));
+    }
+    SlpObjString *argv_name = slp_vm_copy_string(vm, "@ARGV", 5);
+    slp_obj_hash_set(&allocator, vm->globals, SLP_OBJ_VAL(argv_name), SLP_OBJ_VAL(argv_array));
 
     /* Initialize libaggressor with our fallback and state */
     AggressorConfig cfg = {

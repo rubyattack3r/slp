@@ -130,7 +130,7 @@ validate: tools
 	./bin/cna_validator ./dist/packaged_tools.cna
 
 clean:
-	rm -rf src/*.o tests/*.o extensions/**/*.o extensions/*.o deps/**/*.o
+	rm -rf src/*.o tests/*.o extensions/**/*.o extensions/*.o deps/**/*.o tools/common/*.o
 	rm -rf bin/ dist/ *.cna .aggressor_history .slp_history test_no_rewrite
 
 amalgamate:
