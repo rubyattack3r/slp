@@ -41,6 +41,16 @@ typedef struct {
 
 static AliasRecord alias_registry[MAX_ALIASES];
 static int alias_count = 0;
+
+typedef struct {
+    char event_name[128];
+    SlpObjClosure *closure;
+} EventRecord;
+
+#define MAX_EVENTS 512
+static EventRecord event_registry[MAX_EVENTS];
+static int event_count = 0;
+
 static REPLState global_repl_state;
 
 /* -----------------------------------------------------------------------
@@ -119,18 +129,7 @@ static void alias_handler(SlpVM *vm, const char *keyword, const char *name,
  * Mocks & Overrides
  * ----------------------------------------------------------------------- */
 
-static SlpValue val_beacon_info(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    (void)args; (void)ud;
-    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) {
-        const char *key = SLP_AS_STRING(args[1])->chars;
-        if (strcmp(key, "barch") == 0) {
-            return SLP_OBJ_VAL(slp_vm_copy_string(vm, "x64", 3));
-        } else if (strcmp(key, "isadmin") == 0) {
-            return SLP_NUM_VAL(1);
-        }
-    }
-    return SLP_OBJ_VAL(slp_vm_copy_string(vm, "mock_beacon_info_val", 20));
-}
+
 
 static SlpValue val_deleteFile(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     (void)vm; (void)args; (void)argc; (void)ud;
@@ -297,6 +296,108 @@ static SlpValue val_closef(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     return SLP_NULL_VAL;
 }
 
+static SlpValue val_dialog_show(SlpVM *vm, SlpValue *args, int argc, void *ud) {
+    (void)ud;
+    if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_HASH) {
+        SlpObjHash *dlg = SLP_AS_HASH(args[0]);
+        
+        SlpValue title_val = slp_obj_hash_get(dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__title", 7)));
+        const char *title = (SLP_IS_OBJ(title_val) && SLP_OBJ_TYPE(title_val) == SLP_OBJ_STRING) ? SLP_AS_STRING(title_val)->chars : "Dialog";
+        
+        printf("\n\x1b[36m==================================================\x1b[0m\n");
+        printf("  \x1b[1mDIALOG UI: %s\x1b[0m\n", title);
+        printf("\x1b[36m==================================================\x1b[0m\n");
+        
+        SlpValue ctrls_val = slp_obj_hash_get(dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__controls", 10)));
+        if (SLP_IS_OBJ(ctrls_val) && SLP_OBJ_TYPE(ctrls_val) == SLP_OBJ_ARRAY) {
+            SlpObjArray *ctrls = SLP_AS_ARRAY(ctrls_val);
+            for (int i = 0; i < ctrls->count; i++) {
+                SlpValue ctrl_val = ctrls->elements[i];
+                if (SLP_IS_OBJ(ctrl_val) && SLP_OBJ_TYPE(ctrl_val) == SLP_OBJ_HASH) {
+                    SlpObjHash *ctrl = SLP_AS_HASH(ctrl_val);
+                    SlpValue key = slp_obj_hash_get(ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "key", 3)));
+                    SlpValue label = slp_obj_hash_get(ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "label", 5)));
+                    
+                    const char *lbl_str = (SLP_IS_OBJ(label) && SLP_OBJ_TYPE(label) == SLP_OBJ_STRING) ? SLP_AS_STRING(label)->chars : "";
+                    const char *key_str = (SLP_IS_OBJ(key) && SLP_OBJ_TYPE(key) == SLP_OBJ_STRING) ? SLP_AS_STRING(key)->chars : "";
+                    
+                    SlpValue cur_val = slp_obj_hash_get(dlg, key);
+                    char cur_str[128] = {0};
+                    if (SLP_IS_OBJ(cur_val) && SLP_OBJ_TYPE(cur_val) == SLP_OBJ_STRING) {
+                        strncpy(cur_str, SLP_AS_STRING(cur_val)->chars, sizeof(cur_str)-1);
+                    } else if (SLP_IS_NUM(cur_val)) {
+                        snprintf(cur_str, sizeof(cur_str), "%g", SLP_AS_NUM(cur_val));
+                    } else if (SLP_IS_BOOL(cur_val)) {
+                        strcpy(cur_str, SLP_AS_BOOL(cur_val) ? "true" : "false");
+                    }
+                    
+                    printf("  %-20s [%-10s]: %s\n", lbl_str, key_str, cur_str);
+                }
+            }
+        }
+        
+        printf("\x1b[36m--------------------------------------------------\x1b[0m\n");
+        
+        SlpValue btns_val = slp_obj_hash_get(dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__buttons", 9)));
+        const char *first_btn = "Submit";
+        if (SLP_IS_OBJ(btns_val) && SLP_OBJ_TYPE(btns_val) == SLP_OBJ_ARRAY) {
+            SlpObjArray *btns = SLP_AS_ARRAY(btns_val);
+            printf("  ");
+            for (int i = 0; i < btns->count; i++) {
+                SlpValue btn_val = btns->elements[i];
+                if (SLP_IS_OBJ(btn_val) && SLP_OBJ_TYPE(btn_val) == SLP_OBJ_HASH) {
+                    SlpObjHash *btn = SLP_AS_HASH(btn_val);
+                    SlpValue label = slp_obj_hash_get(btn, SLP_OBJ_VAL(slp_vm_copy_string(vm, "label", 5)));
+                    SlpValue action = slp_obj_hash_get(btn, SLP_OBJ_VAL(slp_vm_copy_string(vm, "action", 6)));
+                    const char *lbl = (SLP_IS_OBJ(label) && SLP_OBJ_TYPE(label) == SLP_OBJ_STRING) ? SLP_AS_STRING(label)->chars : "Button";
+                    const char *act = (SLP_IS_OBJ(action) && SLP_OBJ_TYPE(action) == SLP_OBJ_STRING) ? SLP_AS_STRING(action)->chars : lbl;
+                    if (i == 0) first_btn = act;
+                    printf("[ %s ]  ", lbl);
+                }
+            }
+            printf("\n");
+        } else {
+            printf("  [ Submit ]\n");
+        }
+        printf("\x1b[36m==================================================\x1b[0m\n\n");
+        
+        SlpValue callback = slp_obj_hash_get(dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__callback", 10)));
+        if (SLP_IS_OBJ(callback) && SLP_OBJ_TYPE(callback) == SLP_OBJ_CLOSURE) {
+            printf("[*] Auto-submitting dialog via callback action: '%s'...\n", first_btn);
+            
+            SlpObjString *gname = slp_vm_copy_string(vm, "__dialog_callback", 17);
+            slp_obj_hash_set(vm->allocator, vm->globals, SLP_OBJ_VAL(gname), callback);
+            
+            SlpObjString *dname = slp_vm_copy_string(vm, "__dialog_obj", 12);
+            slp_obj_hash_set(vm->allocator, vm->globals, SLP_OBJ_VAL(dname), args[0]);
+            
+            char cmd[512];
+            snprintf(cmd, sizeof(cmd), "__dialog_callback(__dialog_obj, '%s');", first_btn);
+            slp_vm_interpret(vm, cmd);
+        }
+    }
+    return SLP_BOOL_VAL(true);
+}
+
+static void on_handler(SlpVM *vm, const char *keyword, const char *name,
+                       const char *str, SlpObjClosure *closure,
+                       void *ud) {
+    (void)keyword; (void)str; (void)ud;
+    if (!name) return;
+
+    if (event_count < MAX_EVENTS) {
+        strncpy(event_registry[event_count].event_name, name, sizeof(event_registry[event_count].event_name) - 1);
+        event_registry[event_count].event_name[sizeof(event_registry[event_count].event_name) - 1] = '\0';
+        event_registry[event_count].closure = closure;
+        event_count++;
+    }
+
+    char global_name[256];
+    snprintf(global_name, sizeof(global_name), "__event_%s", name);
+    SlpObjString *gname = slp_vm_copy_string(vm, global_name, strlen(global_name));
+    slp_obj_hash_set(vm->allocator, vm->globals, SLP_OBJ_VAL(gname), SLP_OBJ_VAL(closure));
+}
+
 static SlpValue repl_fallback(SlpVM *vm, const char *func_name,
                                  SlpValue *args, int argc,
                                  void *user_data) {
@@ -323,6 +424,21 @@ static void completion(const char *buf, int pos, bestlineCompletions *lc) {
                 strncpy(new_buf, buf, start);
                 strcpy(new_buf + start, alias_registry[i].name);
                 strcpy(new_buf + start + strlen(alias_registry[i].name), buf + pos);
+                bestlineAddCompletion(lc, new_buf);
+                free(new_buf);
+            }
+        }
+    }
+
+    const char *builtins[] = {"trigger", "setbeacon", "exit", "quit"};
+    for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
+        if (strncmp(buf + start, builtins[i], word_len) == 0) {
+            size_t new_len = start + strlen(builtins[i]) + strlen(buf + pos) + 1;
+            char *new_buf = malloc(new_len);
+            if (new_buf) {
+                strncpy(new_buf, buf, start);
+                strcpy(new_buf + start, builtins[i]);
+                strcpy(new_buf + start + strlen(builtins[i]), buf + pos);
                 bestlineAddCompletion(lc, new_buf);
                 free(new_buf);
             }
@@ -371,7 +487,7 @@ int main(int argc, char **argv) {
     slp_vm_register_native(vm, "println", val_println);
 
     aggressor_set(ag_state, "barch",                    val_barch);
-    aggressor_set(ag_state, "beacon_info",              val_beacon_info);
+
     aggressor_set(ag_state, "deleteFile",               val_deleteFile);
     aggressor_set(ag_state, "readAll",                  val_readAll);
     aggressor_set(ag_state, "script_resource",          val_script_resource);
@@ -385,9 +501,13 @@ int main(int argc, char **argv) {
     aggressor_set(ag_state, "openf",                    val_openf);
     aggressor_set(ag_state, "readb",                    val_readb);
     aggressor_set(ag_state, "closef",                   val_closef);
+    aggressor_set(ag_state, "dialog_show",              val_dialog_show);
 
     /* Register bridge types */
-    AggressorBridgeOps bridge_ops = { .alias_handler = alias_handler };
+    AggressorBridgeOps bridge_ops = { 
+        .alias_handler = alias_handler,
+        .on_handler = on_handler
+    };
     aggressor_set_bridge_ops(vm, &bridge_ops);
 
     /* Load the script */
@@ -419,11 +539,19 @@ int main(int argc, char **argv) {
     printf("[+] Script loaded successfully.\n");
     printf("\n\x1b[32m=== Aggressor REPL ===\x1b[0m\n");
     printf("Type an alias to execute (e.g. 'sc_config arg1 arg2'). Type 'exit' to quit.\n");
-    printf("Registered aliases: %d\n\n", alias_count);
+    printf("Registered aliases: %d, events: %d\n\n", alias_count, event_count);
 
     bestlineSetCompletionCallback(completion);
 
-    /* Note: History loading/saving is explicitly disabled */
+    /* Set up history path cleanly in user's home directory */
+    char history_path[1024];
+    const char *home = getenv("HOME");
+    if (home) {
+        snprintf(history_path, sizeof(history_path), "%s/.aggressor_history", home);
+    } else {
+        strncpy(history_path, ".aggressor_history", sizeof(history_path)-1);
+    }
+    bestlineHistoryLoad(history_path);
 
     while (1) {
         char *line = bestline("aggressor> ");
@@ -435,6 +563,9 @@ int main(int argc, char **argv) {
         }
 
         if (line[0] != '\0') {
+            bestlineHistoryAdd(line);
+            bestlineHistorySave(history_path);
+
             char *cmd = strdup(line);
             char *args_str = "";
             char *space = strchr(cmd, ' ');
@@ -443,29 +574,87 @@ int main(int argc, char **argv) {
                 args_str = space + 1;
             }
 
-            int found = 0;
-            for (int i = 0; i < alias_count; i++) {
-                if (strcmp(alias_registry[i].name, cmd) == 0) {
-                    found = 1;
-                    char eval_buf[4096];
-                    int len = snprintf(eval_buf, sizeof(eval_buf), "__alias_%s('1'", cmd);
-                    char *args_copy = strdup(args_str);
-                    char *token = strtok(args_copy, " \t\r\n");
-                    while (token) {
-                        int written = snprintf(eval_buf + len, sizeof(eval_buf) - len, ", '%s'", token);
-                        if (written > 0) len += written;
-                        token = strtok(NULL, " \t\r\n");
+            if (strcmp(cmd, "trigger") == 0) {
+                char *event_cmd = strdup(args_str);
+                char *event_args = "";
+                char *event_space = strchr(event_cmd, ' ');
+                if (event_space) {
+                    *event_space = '\0';
+                    event_args = event_space + 1;
+                }
+
+                int found = 0;
+                for (int i = 0; i < event_count; i++) {
+                    if (strcmp(event_registry[i].event_name, event_cmd) == 0) {
+                        found = 1;
+                        char eval_buf[4096];
+                        int len = snprintf(eval_buf, sizeof(eval_buf), "__event_%s(", event_cmd);
+                        char *args_copy = strdup(event_args);
+                        char *token = strtok(args_copy, " \t\r\n");
+                        int arg_idx = 0;
+                        while (token) {
+                            int written = snprintf(eval_buf + len, sizeof(eval_buf) - len, "%s'%s'", (arg_idx > 0 ? ", " : ""), token);
+                            if (written > 0) len += written;
+                            arg_idx++;
+                            token = strtok(NULL, " \t\r\n");
+                        }
+                        free(args_copy);
+                        snprintf(eval_buf + len, sizeof(eval_buf) - len, ");");
+                        
+                        printf("[*] Triggering event '%s'...\n", event_cmd);
+                        vm->repl_mode = true;
+                        slp_vm_interpret(vm, eval_buf);
+                        vm->repl_mode = false;
+                        break;
                     }
-                    free(args_copy);
-                    snprintf(eval_buf + len, sizeof(eval_buf) - len, ");");
+                }
+                if (!found) printf("[-] Event hook '%s' not registered.\n", event_cmd);
+                free(event_cmd);
+            } else if (strcmp(cmd, "setbeacon") == 0) {
+                char *args_copy = strdup(args_str);
+                char *id = strtok(args_copy, " \t\r\n");
+                char *key = strtok(NULL, " \t\r\n");
+                char *value = strtok(NULL, "\r\n");
+                
+                if (id && key && value) {
+                    while (*value == ' ' || *value == '\t') value++;
+                    
+                    char eval_buf[1024];
+                    snprintf(eval_buf, sizeof(eval_buf), "beacon_info_set('%s', '%s', '%s');", id, key, value);
                     
                     vm->repl_mode = true;
                     slp_vm_interpret(vm, eval_buf);
                     vm->repl_mode = false;
-                    break;
+                    printf("[+] Set beacon %s property '%s' = '%s'\n", id, key, value);
+                } else {
+                    printf("Usage: setbeacon <id> <key> <value>\n");
                 }
+                free(args_copy);
+            } else {
+                int found = 0;
+                for (int i = 0; i < alias_count; i++) {
+                    if (strcmp(alias_registry[i].name, cmd) == 0) {
+                        found = 1;
+                        char eval_buf[4096];
+                        int len = snprintf(eval_buf, sizeof(eval_buf), "__alias_%s('1'", cmd);
+                        char *args_copy = strdup(args_str);
+                        char *token = strtok(args_copy, " \t\r\n");
+                        while (token) {
+                            int written = snprintf(eval_buf + len, sizeof(eval_buf) - len, ", '%s'", token);
+                            if (written > 0) len += written;
+                            token = strtok(NULL, " \t\r\n");
+                        }
+                        free(args_copy);
+                        snprintf(eval_buf + len, sizeof(eval_buf) - len, ");");
+                        
+                        vm->repl_mode = true;
+                        slp_vm_interpret(vm, eval_buf);
+                        vm->repl_mode = false;
+                        break;
+                    }
+                }
+                if (!found) printf("[-] Alias '%s' not found.\n", cmd);
             }
-            if (!found) printf("[-] Alias '%s' not found.\n", cmd);
             free(cmd);
         }
         free(line);

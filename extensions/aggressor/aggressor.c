@@ -33,6 +33,16 @@ typedef struct {
     char name[64];
 } TrampolineSlot;
 
+typedef struct {
+    char key[64];
+    char value[256];
+} BeaconProperty;
+
+typedef struct {
+    BeaconProperty properties[32];
+    int property_count;
+} MockBeacon;
+
 struct AggressorState {
     AggressorConfig config;
     AggressorOverride overrides[AGGRESSOR_MAX_OVERRIDES];
@@ -44,6 +54,10 @@ struct AggressorState {
     AggressorCommand *commands;
     int command_count;
     int command_capacity;
+
+    /* Dynamic mock beacons */
+    MockBeacon mock_beacons[32];
+    int mock_beacon_count;
 };
 
 
@@ -145,6 +159,228 @@ static SlpValue dispatch(SlpVM *vm, AggressorState *state, const char *name,
             }
         }
         return SLP_OBJ_VAL(slp_vm_copy_string(vm, "Mock details", 12));
+    } else if (strcmp(name, "beacons") == 0) {
+        SlpObjArray *arr = slp_obj_array_new(vm->allocator);
+        for (int i = 0; i < state->mock_beacon_count; i++) {
+            SlpObjHash *b = slp_obj_hash_new(vm->allocator);
+            for (int j = 0; j < state->mock_beacons[i].property_count; j++) {
+                const char *key = state->mock_beacons[i].properties[j].key;
+                const char *val = state->mock_beacons[i].properties[j].value;
+                SlpValue val_obj;
+                if (strcmp(key, "isadmin") == 0) {
+                    val_obj = SLP_NUM_VAL(atoi(val));
+                } else {
+                    val_obj = SLP_OBJ_VAL(slp_vm_copy_string(vm, val, strlen(val)));
+                }
+                slp_obj_hash_set(vm->allocator, b, 
+                    SLP_OBJ_VAL(slp_vm_copy_string(vm, key, strlen(key))),
+                    val_obj);
+            }
+            slp_obj_array_push(vm->allocator, arr, SLP_OBJ_VAL(b));
+        }
+        return SLP_OBJ_VAL(arr);
+    } else if (strcmp(name, "beacon_ids") == 0) {
+        SlpObjArray *arr = slp_obj_array_new(vm->allocator);
+        for (int i = 0; i < state->mock_beacon_count; i++) {
+            const char *id_val = "unknown";
+            for (int j = 0; j < state->mock_beacons[i].property_count; j++) {
+                if (strcmp(state->mock_beacons[i].properties[j].key, "id") == 0) {
+                    id_val = state->mock_beacons[i].properties[j].value;
+                    break;
+                }
+            }
+            slp_obj_array_push(vm->allocator, arr, SLP_OBJ_VAL(slp_vm_copy_string(vm, id_val, strlen(id_val))));
+        }
+        return SLP_OBJ_VAL(arr);
+    } else if (strcmp(name, "beacon_info") == 0) {
+        if (argc >= 2 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING &&
+                         SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) {
+            const char *id = SLP_AS_STRING(args[0])->chars;
+            const char *key = SLP_AS_STRING(args[1])->chars;
+            
+            for (int i = 0; i < state->mock_beacon_count; i++) {
+                int matches = 0;
+                for (int j = 0; j < state->mock_beacons[i].property_count; j++) {
+                    if (strcmp(state->mock_beacons[i].properties[j].key, "id") == 0 &&
+                        strcmp(state->mock_beacons[i].properties[j].value, id) == 0) {
+                        matches = 1;
+                        break;
+                    }
+                }
+                if (matches) {
+                    for (int j = 0; j < state->mock_beacons[i].property_count; j++) {
+                        if (strcmp(state->mock_beacons[i].properties[j].key, key) == 0) {
+                            const char *val = state->mock_beacons[i].properties[j].value;
+                            if (strcmp(key, "isadmin") == 0) {
+                                return SLP_NUM_VAL(atoi(val));
+                            }
+                            return SLP_OBJ_VAL(slp_vm_copy_string(vm, val, strlen(val)));
+                        }
+                    }
+                    if (strcmp(key, "barch") == 0) return SLP_OBJ_VAL(slp_vm_copy_string(vm, "x64", 3));
+                    if (strcmp(key, "isadmin") == 0) return SLP_NUM_VAL(1);
+                    return SLP_NULL_VAL;
+                }
+            }
+            
+            if (strcmp(key, "barch") == 0) return SLP_OBJ_VAL(slp_vm_copy_string(vm, "x64", 3));
+            if (strcmp(key, "isadmin") == 0) return SLP_NUM_VAL(1);
+            if (strcmp(key, "computer") == 0) return SLP_OBJ_VAL(slp_vm_copy_string(vm, "MOCK-COMP", 9));
+            if (strcmp(key, "user") == 0) return SLP_OBJ_VAL(slp_vm_copy_string(vm, "mockuser", 8));
+        }
+        return SLP_OBJ_VAL(slp_vm_copy_string(vm, "mock_beacon_info_val", 20));
+    } else if (strcmp(name, "beacon_info_set") == 0) {
+        if (argc >= 3 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING &&
+                         SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) {
+            const char *id = SLP_AS_STRING(args[0])->chars;
+            const char *key = SLP_AS_STRING(args[1])->chars;
+            
+            char val_buf[256] = {0};
+            if (SLP_IS_NUM(args[2])) {
+                snprintf(val_buf, sizeof(val_buf), "%g", SLP_AS_NUM(args[2]));
+            } else if (SLP_IS_BOOL(args[2])) {
+                strncpy(val_buf, SLP_AS_BOOL(args[2]) ? "1" : "0", sizeof(val_buf)-1);
+            } else if (SLP_IS_NULL(args[2])) {
+                val_buf[0] = '\0';
+            } else if (SLP_IS_OBJ(args[2]) && SLP_OBJ_TYPE(args[2]) == SLP_OBJ_STRING) {
+                strncpy(val_buf, SLP_AS_STRING(args[2])->chars, sizeof(val_buf)-1);
+            } else {
+                strncpy(val_buf, "[object]", sizeof(val_buf)-1);
+            }
+            
+            MockBeacon *target = NULL;
+            for (int i = 0; i < state->mock_beacon_count; i++) {
+                for (int j = 0; j < state->mock_beacons[i].property_count; j++) {
+                    if (strcmp(state->mock_beacons[i].properties[j].key, "id") == 0) {
+                        if (strcmp(state->mock_beacons[i].properties[j].value, id) == 0) {
+                            target = &state->mock_beacons[i];
+                            break;
+                        }
+                    }
+                }
+                if (target) break;
+            }
+            
+            if (!target && state->mock_beacon_count < 32) {
+                target = &state->mock_beacons[state->mock_beacon_count++];
+                target->property_count = 1;
+                strcpy(target->properties[0].key, "id");
+                strncpy(target->properties[0].value, id, 255);
+            }
+            
+            if (target) {
+                int prop_idx = -1;
+                for (int j = 0; j < target->property_count; j++) {
+                    if (strcmp(target->properties[j].key, key) == 0) {
+                        prop_idx = j;
+                        break;
+                    }
+                }
+                
+                if (prop_idx != -1) {
+                    strncpy(target->properties[prop_idx].value, val_buf, 255);
+                } else if (target->property_count < 32) {
+                    int new_idx = target->property_count++;
+                    strncpy(target->properties[new_idx].key, key, 63);
+                    strncpy(target->properties[new_idx].value, val_buf, 255);
+                }
+            }
+        }
+        return SLP_NULL_VAL;
+    } else if (strcmp(name, "barch") == 0) {
+        return SLP_OBJ_VAL(slp_vm_copy_string(vm, "x64", 3));
+    } else if (strcmp(name, "dialog") == 0) {
+        SlpObjHash *dlg = slp_obj_hash_new(vm->allocator);
+        slp_obj_hash_set(vm->allocator, dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__type", 6)), SLP_OBJ_VAL(slp_vm_copy_string(vm, "dialog", 6)));
+        
+        const char *title = (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) ? SLP_AS_STRING(args[0])->chars : "Untitled Dialog";
+        slp_obj_hash_set(vm->allocator, dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__title", 7)), SLP_OBJ_VAL(slp_vm_copy_string(vm, title, strlen(title))));
+        
+        if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_HASH) {
+            SlpObjHash *defaults = SLP_AS_HASH(args[1]);
+            for (int i = 0; i < defaults->capacity; i++) {
+                if (!SLP_IS_NULL(defaults->entries[i].key)) {
+                    slp_obj_hash_set(vm->allocator, dlg, defaults->entries[i].key, defaults->entries[i].value);
+                }
+            }
+        }
+        
+        if (argc >= 3 && SLP_IS_OBJ(args[2]) && SLP_OBJ_TYPE(args[2]) == SLP_OBJ_CLOSURE) {
+            slp_obj_hash_set(vm->allocator, dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__callback", 10)), args[2]);
+        }
+        
+        SlpObjArray *ctrls = slp_obj_array_new(vm->allocator);
+        slp_obj_hash_set(vm->allocator, dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__controls", 10)), SLP_OBJ_VAL(ctrls));
+        
+        SlpObjArray *btns = slp_obj_array_new(vm->allocator);
+        slp_obj_hash_set(vm->allocator, dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__buttons", 9)), SLP_OBJ_VAL(btns));
+        
+        return SLP_OBJ_VAL(dlg);
+    } else if (strcmp(name, "drow") == 0 || strcmp(name, "drow_text") == 0 || strcmp(name, "dcheckbox") == 0 || 
+               strcmp(name, "dtext") == 0 || strcmp(name, "dtextarea") == 0 || strcmp(name, "dcombobox") == 0 || 
+               strcmp(name, "dlist") == 0 || strcmp(name, "dfile") == 0) {
+        if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_HASH) {
+            SlpObjHash *dlg = SLP_AS_HASH(args[0]);
+            SlpValue ctrls_val = slp_obj_hash_get(dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__controls", 10)));
+            if (SLP_IS_OBJ(ctrls_val) && SLP_OBJ_TYPE(ctrls_val) == SLP_OBJ_ARRAY) {
+                SlpObjArray *ctrls = SLP_AS_ARRAY(ctrls_val);
+                
+                SlpObjHash *ctrl = slp_obj_hash_new(vm->allocator);
+                slp_obj_hash_set(vm->allocator, ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "type", 4)), SLP_OBJ_VAL(slp_vm_copy_string(vm, name, strlen(name))));
+                
+                if (strcmp(name, "drow") == 0 || strcmp(name, "drow_text") == 0) {
+                    if (argc >= 2) slp_obj_hash_set(vm->allocator, ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "key", 3)), args[1]);
+                    if (argc >= 3) slp_obj_hash_set(vm->allocator, ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "label", 5)), args[2]);
+                    if (argc >= 4) {
+                        slp_obj_hash_set(vm->allocator, ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "description", 11)), args[3]);
+                        if (SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) {
+                            slp_obj_hash_set(vm->allocator, dlg, args[1], args[3]);
+                        }
+                    }
+                } else if (strcmp(name, "dcheckbox") == 0) {
+                    if (argc >= 2) slp_obj_hash_set(vm->allocator, ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "key", 3)), args[1]);
+                    if (argc >= 3) slp_obj_hash_set(vm->allocator, ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "label", 5)), args[2]);
+                    if (argc >= 4) slp_obj_hash_set(vm->allocator, ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "description", 11)), args[3]);
+                    if (SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) {
+                        SlpValue current = slp_obj_hash_get(dlg, args[1]);
+                        if (SLP_IS_NULL(current)) {
+                            slp_obj_hash_set(vm->allocator, dlg, args[1], SLP_BOOL_VAL(false));
+                        }
+                    }
+                } else {
+                    if (argc >= 2) slp_obj_hash_set(vm->allocator, ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "key", 3)), args[1]);
+                    if (argc >= 3) slp_obj_hash_set(vm->allocator, ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "label", 5)), args[2]);
+                    if (argc >= 4) {
+                        slp_obj_hash_set(vm->allocator, ctrl, SLP_OBJ_VAL(slp_vm_copy_string(vm, "options", 7)), args[3]);
+                        if (SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) {
+                            SlpValue current = slp_obj_hash_get(dlg, args[1]);
+                            if (SLP_IS_NULL(current)) {
+                                slp_obj_hash_set(vm->allocator, dlg, args[1], args[3]);
+                            }
+                        }
+                    }
+                }
+                slp_obj_array_push(vm->allocator, ctrls, SLP_OBJ_VAL(ctrl));
+            }
+        }
+        return SLP_NULL_VAL;
+    } else if (strcmp(name, "dbutton") == 0) {
+        if (argc >= 3 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_HASH) {
+            SlpObjHash *dlg = SLP_AS_HASH(args[0]);
+            SlpValue btns_val = slp_obj_hash_get(dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__buttons", 9)));
+            if (SLP_IS_OBJ(btns_val) && SLP_OBJ_TYPE(btns_val) == SLP_OBJ_ARRAY) {
+                SlpObjArray *btns = SLP_AS_ARRAY(btns_val);
+                
+                SlpObjHash *btn = slp_obj_hash_new(vm->allocator);
+                slp_obj_hash_set(vm->allocator, btn, SLP_OBJ_VAL(slp_vm_copy_string(vm, "label", 5)), args[1]);
+                slp_obj_hash_set(vm->allocator, btn, SLP_OBJ_VAL(slp_vm_copy_string(vm, "action", 6)), args[2]);
+                
+                slp_obj_array_push(vm->allocator, btns, SLP_OBJ_VAL(btn));
+            }
+        }
+        return SLP_NULL_VAL;
+    } else if (strcmp(name, "dialog_show") == 0) {
+        return SLP_BOOL_VAL(true);
     }
 
     /* Fall through to consumer fallback */
@@ -265,6 +501,9 @@ static const char *dispatched_functions[] = {
     "barch",
     "binfo",
     "beacon_info",
+    "beacons",
+    "beacon_ids",
+    "beacon_info_set",
     "beacon_command_register",
     "beacon_command_detail",
     "bupload_raw",
@@ -289,6 +528,17 @@ static const char *dispatched_functions[] = {
     /* UI */
     "prompt_file_open",
     "show_message",
+    "dialog",
+    "dialog_show",
+    "drow",
+    "drow_text",
+    "dbutton",
+    "dcheckbox",
+    "dtext",
+    "dtextarea",
+    "dcombobox",
+    "dlist",
+    "dfile",
 
     /* Crypto */
     "ohash",
@@ -313,6 +563,42 @@ static const char *dispatched_functions[] = {
 AggressorState *aggressor_init(SlpVM *vm, AggressorConfig *config) {
     AggressorState *state = malloc(sizeof(AggressorState));
     memset(state, 0, sizeof(AggressorState));
+
+    /* Initialize default mock beacons */
+    state->mock_beacon_count = 3;
+
+    /* Beacon 12345 */
+    MockBeacon *b1 = &state->mock_beacons[0];
+    b1->property_count = 7;
+    strcpy(b1->properties[0].key, "id"); strcpy(b1->properties[0].value, "12345");
+    strcpy(b1->properties[1].key, "user"); strcpy(b1->properties[1].value, "SYSTEM");
+    strcpy(b1->properties[2].key, "computer"); strcpy(b1->properties[2].value, "WIN-WORKSTATION");
+    strcpy(b1->properties[3].key, "isadmin"); strcpy(b1->properties[3].value, "1");
+    strcpy(b1->properties[4].key, "barch"); strcpy(b1->properties[4].value, "x64");
+    strcpy(b1->properties[5].key, "os"); strcpy(b1->properties[5].value, "Windows");
+    strcpy(b1->properties[6].key, "host"); strcpy(b1->properties[6].value, "192.168.1.50");
+
+    /* Beacon 67890 */
+    MockBeacon *b2 = &state->mock_beacons[1];
+    b2->property_count = 7;
+    strcpy(b2->properties[0].key, "id"); strcpy(b2->properties[0].value, "67890");
+    strcpy(b2->properties[1].key, "user"); strcpy(b2->properties[1].value, "jdoe");
+    strcpy(b2->properties[2].key, "computer"); strcpy(b2->properties[2].value, "HR-PC");
+    strcpy(b2->properties[3].key, "isadmin"); strcpy(b2->properties[3].value, "0");
+    strcpy(b2->properties[4].key, "barch"); strcpy(b2->properties[4].value, "x86");
+    strcpy(b2->properties[5].key, "os"); strcpy(b2->properties[5].value, "Windows");
+    strcpy(b2->properties[6].key, "host"); strcpy(b2->properties[6].value, "192.168.1.112");
+
+    /* Beacon 11111 */
+    MockBeacon *b3 = &state->mock_beacons[2];
+    b3->property_count = 7;
+    strcpy(b3->properties[0].key, "id"); strcpy(b3->properties[0].value, "11111");
+    strcpy(b3->properties[1].key, "user"); strcpy(b3->properties[1].value, "root");
+    strcpy(b3->properties[2].key, "computer"); strcpy(b3->properties[2].value, "prod-web-01");
+    strcpy(b3->properties[3].key, "isadmin"); strcpy(b3->properties[3].value, "1");
+    strcpy(b3->properties[4].key, "barch"); strcpy(b3->properties[4].value, "x64");
+    strcpy(b3->properties[5].key, "os"); strcpy(b3->properties[5].value, "Linux");
+    strcpy(b3->properties[6].key, "host"); strcpy(b3->properties[6].value, "10.0.4.15");
 
     /* Store config */
     if (config) {
@@ -375,6 +661,8 @@ void aggressor_set_beacon_ops(SlpVM *vm, AggressorBeaconOps *ops) {
     if (ops->barch)                 aggressor_set(state, "barch",                 ops->barch);
     if (ops->binfo)                 aggressor_set(state, "binfo",                 ops->binfo);
     if (ops->beacon_info)           aggressor_set(state, "beacon_info",           ops->beacon_info);
+    if (ops->beacons)               aggressor_set(state, "beacons",               ops->beacons);
+    if (ops->beacon_ids)            aggressor_set(state, "beacon_ids",            ops->beacon_ids);
     if (ops->beacon_command_register) aggressor_set(state, "beacon_command_register", ops->beacon_command_register);
     if (ops->beacon_command_detail) aggressor_set(state, "beacon_command_detail",  ops->beacon_command_detail);
     if (ops->bupload_raw)           aggressor_set(state, "bupload_raw",           ops->bupload_raw);

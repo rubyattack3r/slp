@@ -131,3 +131,151 @@ TEST_CASE("libaggressor: builtin pure utilities") {
     aggressor_deinit(state);
     slp_vm_free(vm);
 }
+
+static void test_aggressor_error(void *ud, int line, const char *msg) {
+    (void)ud;
+    fprintf(stderr, "[Test VM Error] Line %d: %s\n", line, msg);
+}
+
+TEST_CASE("libaggressor: stateful beacon and dialog mocks") {
+    SlpVM *vm = slp_vm_new(&vm_allocator);
+    slp_stdlib_init(vm);
+    slp_vm_set_error_fn(vm, test_aggressor_error, nullptr);
+    AggressorConfig cfg = {
+        .fallback = nullptr,
+        .user_data = nullptr,
+    };
+    AggressorState *state = aggressor_init(vm, &cfg);
+
+    /* Test beacons() array and size */
+    SlpResult r = slp_vm_interpret(vm, 
+        "$b = beacons();"
+        "assert size($b) == 3;"
+        "assert $b[0]['id'] eq \"12345\";"
+        "assert $b[0]['user'] eq \"SYSTEM\";"
+        "assert $b[1]['id'] eq \"67890\";"
+        "assert $b[1]['user'] eq \"jdoe\";"
+        "assert $b[2]['id'] eq \"11111\";"
+        "assert $b[2]['user'] eq \"root\";"
+    );
+    CHECK(r == SLP_OK);
+
+    /* Test beacon_ids() array */
+    r = slp_vm_interpret(vm,
+        "$ids = beacon_ids();"
+        "assert size($ids) == 3;"
+        "assert $ids[0] eq \"12345\";"
+        "assert $ids[1] eq \"67890\";"
+        "assert $ids[2] eq \"11111\";"
+    );
+    CHECK(r == SLP_OK);
+
+    /* Test stateful beacon_info() attributes lookup */
+    r = slp_vm_interpret(vm,
+        "assert beacon_info(\"12345\", \"user\") eq \"SYSTEM\";"
+        "assert beacon_info(\"67890\", \"computer\") eq \"HR-PC\";"
+        "assert beacon_info(\"11111\", \"os\") eq \"Linux\";"
+        "assert beacon_info(\"unknown\", \"barch\") eq \"x64\";"
+    );
+    CHECK(r == SLP_OK);
+
+    /* Test dialog builder, drow, dbutton */
+    r = slp_vm_interpret(vm,
+        "sub my_callback { }"
+        "$d = dialog(\"My Harvester\", %(user => \"default_user\"), &my_callback);"
+    );
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "assert $d['__title'] eq \"My Harvester\";");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "assert $d['user'] eq \"default_user\";");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "drow_text($d, \"user\", \"Username:\");");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "assert size($d['__controls']) == 1;");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "assert $d['__controls'][0]['type'] eq \"drow_text\";");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "assert $d['__controls'][0]['key'] eq \"user\";");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "dcheckbox($d, \"flag\", \"Enable Checkbox\");");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "assert size($d['__controls']) == 2;");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "assert $d['__controls'][1]['type'] eq \"dcheckbox\";");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "assert $d['__controls'][1]['key'] eq \"flag\";");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "dbutton($d, \"Launch\", \"submit_action\");");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "assert size($d['__buttons']) == 1;");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "assert $d['__buttons'][0]['label'] eq \"Launch\";");
+    CHECK(r == SLP_OK);
+
+    r = slp_vm_interpret(vm, "assert $d['__buttons'][0]['action'] eq \"submit_action\";");
+    CHECK(r == SLP_OK);
+
+    aggressor_deinit(state);
+    slp_vm_free(vm);
+}
+
+TEST_CASE("libaggressor: dynamic mock beacon configuration") {
+    SlpVM *vm = slp_vm_new(&vm_allocator);
+    slp_stdlib_init(vm);
+    slp_vm_set_error_fn(vm, test_aggressor_error, nullptr);
+    AggressorConfig cfg = {
+        .fallback = nullptr,
+        .user_data = nullptr,
+    };
+    AggressorState *state = aggressor_init(vm, &cfg);
+
+    /* 1. Update an existing property */
+    SlpResult r = slp_vm_interpret(vm, 
+        "beacon_info_set(\"12345\", \"computer\", \"WIN-NEW-PC\");"
+        "assert beacon_info(\"12345\", \"computer\") eq \"WIN-NEW-PC\";"
+    );
+    CHECK(r == SLP_OK);
+
+    /* 2. Add a new beacon with custom properties */
+    r = slp_vm_interpret(vm,
+        "beacon_info_set(\"99999\", \"process\", \"lsass.exe\");"
+        "beacon_info_set(\"99999\", \"computer\", \"TARGET-DC\");"
+        "assert beacon_info(\"99999\", \"process\") eq \"lsass.exe\";"
+        "assert beacon_info(\"99999\", \"computer\") eq \"TARGET-DC\";"
+    );
+    CHECK(r == SLP_OK);
+
+    /* 3. Check beacon_ids() updates */
+    r = slp_vm_interpret(vm,
+        "$ids = beacon_ids();"
+        "assert size($ids) == 4;"
+        "assert $ids[3] eq \"99999\";"
+    );
+    CHECK(r == SLP_OK);
+
+    /* 4. Check beacons() hash dynamic collection updates */
+    r = slp_vm_interpret(vm,
+        "$b = beacons();"
+        "assert size($b) == 4;"
+        "assert $b[3]['id'] eq \"99999\";"
+        "assert $b[3]['process'] eq \"lsass.exe\";"
+        "assert $b[3]['computer'] eq \"TARGET-DC\";"
+    );
+    CHECK(r == SLP_OK);
+
+    aggressor_deinit(state);
+    slp_vm_free(vm);
+}

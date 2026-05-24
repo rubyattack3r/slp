@@ -297,18 +297,7 @@ static void alias_handler(SlpVM *vm, const char *keyword, const char *name,
  * These are AggressorNativeFn (with user_data), not SlpNativeFn.
  * ----------------------------------------------------------------------- */
 
-static SlpValue val_beacon_info(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    (void)args; (void)ud;
-    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) {
-        const char *key = SLP_AS_STRING(args[1])->chars;
-        if (strcmp(key, "barch") == 0) {
-            return SLP_OBJ_VAL(slp_vm_copy_string(vm, "x64", 3));
-        } else if (strcmp(key, "isadmin") == 0) {
-            return SLP_NUM_VAL(1);
-        }
-    }
-    return SLP_OBJ_VAL(slp_vm_copy_string(vm, "mock_beacon_info_val", 20));
-}
+
 
 static SlpValue val_deleteFile(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     (void)vm; (void)args; (void)argc; (void)ud;
@@ -499,6 +488,22 @@ static SlpValue val_closef(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     return SLP_NULL_VAL;
 }
 
+static SlpValue val_dialog_show(SlpVM *vm, SlpValue *args, int argc, void *ud) {
+    (void)ud;
+    if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_HASH) {
+        SlpObjHash *dlg = SLP_AS_HASH(args[0]);
+        SlpValue callback = slp_obj_hash_get(dlg, SLP_OBJ_VAL(slp_vm_copy_string(vm, "__callback", 10)));
+        if (SLP_IS_OBJ(callback) && SLP_OBJ_TYPE(callback) == SLP_OBJ_CLOSURE) {
+            SlpObjString *gname = slp_vm_copy_string(vm, "__dialog_callback", 17);
+            slp_obj_hash_set(vm->allocator, vm->globals, SLP_OBJ_VAL(gname), callback);
+            SlpObjString *dname = slp_vm_copy_string(vm, "__dialog_obj", 12);
+            slp_obj_hash_set(vm->allocator, vm->globals, SLP_OBJ_VAL(dname), args[0]);
+            slp_vm_interpret(vm, "__dialog_callback(__dialog_obj, 'Submit');");
+        }
+    }
+    return SLP_BOOL_VAL(true);
+}
+
 /* -----------------------------------------------------------------------
  * Fallback: catch-all for any unregistered function
  * ----------------------------------------------------------------------- */
@@ -575,7 +580,7 @@ int main(int argc, char **argv) {
 
     /* Override functions with validation-aware implementations */
     aggressor_set(ag_state, "barch",                    val_barch);
-    aggressor_set(ag_state, "beacon_info",              val_beacon_info);
+
     aggressor_set(ag_state, "deleteFile",               val_deleteFile);
     aggressor_set(ag_state, "readAll",                  val_readAll);
     aggressor_set(ag_state, "script_resource",          val_script_resource);
@@ -589,6 +594,7 @@ int main(int argc, char **argv) {
     aggressor_set(ag_state, "openf",                    val_openf);
     aggressor_set(ag_state, "readb",                    val_readb);
     aggressor_set(ag_state, "closef",                   val_closef);
+    aggressor_set(ag_state, "dialog_show",              val_dialog_show);
 
     /* Register bridge types */
     AggressorBridgeOps bridge_ops = { .alias_handler = alias_handler };

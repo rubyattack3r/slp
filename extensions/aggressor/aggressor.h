@@ -158,6 +158,8 @@ typedef struct {
     AggressorNativeFn barch;
     AggressorNativeFn binfo;
     AggressorNativeFn beacon_info;
+    AggressorNativeFn beacons;
+    AggressorNativeFn beacon_ids;
     AggressorNativeFn beacon_command_register;
     AggressorNativeFn beacon_command_detail;
     AggressorNativeFn bupload_raw;
