@@ -14,6 +14,7 @@
 #include "aggressor.h"
 #include "slp_stdlib.h"
 #include "bestline.h"
+#include "bof.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +45,7 @@ typedef struct {
     char current_alias[128];
     FILE *open_files[MAX_OPEN_FILES];
     char script_dir[512];
+    int verbosity; // 0 = default (no debug, no info), 1 = info (blog, btask), 2 = debug (dispatch traces)
     SlpVM *vm;
     AggressorState *ag_state;
 } REPLState;
@@ -174,15 +176,17 @@ static SlpValue val_bof_pack(SlpVM *vm, SlpValue *args, int argc, void *ud) {
 }
 
 static SlpValue val_btask(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    (void)vm; (void)ud;
-    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
+    (void)vm;
+    REPLState *state = (REPLState *)ud;
+    if (state->verbosity >= 1 && argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
         printf("[Task] %s\n", SLP_AS_STRING(args[1])->chars);
     return SLP_NULL_VAL;
 }
 
 static SlpValue val_blog(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    (void)vm; (void)ud;
-    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
+    (void)vm;
+    REPLState *state = (REPLState *)ud;
+    if (state->verbosity >= 1 && argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
         printf("[Log] %s\n", SLP_AS_STRING(args[1])->chars);
     return SLP_NULL_VAL;
 }
@@ -212,14 +216,37 @@ static SlpValue val_beacon_command_register(SlpVM *vm, SlpValue *args, int argc,
 }
 
 static SlpValue val_beacon_inline_execute(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    (void)vm; (void)ud;
-    printf("[+] \x1b[36mbeacon_inline_execute\x1b[0m triggered!\n");
-    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING)
-        printf("    -> BOF data length: %d bytes\n", SLP_AS_STRING(args[1])->length);
-    if (argc >= 3 && SLP_IS_OBJ(args[2]) && SLP_OBJ_TYPE(args[2]) == SLP_OBJ_STRING)
-        printf("    -> Entrypoint: %s\n", SLP_AS_STRING(args[2])->chars);
-    if (argc >= 4 && SLP_IS_OBJ(args[3]) && SLP_OBJ_TYPE(args[3]) == SLP_OBJ_STRING)
-        printf("    -> Args length: %d bytes\n", SLP_AS_STRING(args[3])->length);
+    (void)vm;
+    REPLState *state = (REPLState *)ud;
+    if (state->verbosity >= 2) printf("[+] \x1b[36mbeacon_inline_execute\x1b[0m triggered!\n");
+    
+    unsigned char *bof_data = NULL;
+    size_t bof_size = 0;
+    const char *entrypoint = "go";
+    unsigned char *bof_args = NULL;
+    size_t bof_args_size = 0;
+
+    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) {
+        SlpObjString *s = SLP_AS_STRING(args[1]);
+        bof_data = (unsigned char *)s->chars;
+        bof_size = s->length;
+        if (state->verbosity >= 2) printf("    -> BOF data length: %zu bytes\n", bof_size);
+    }
+    if (argc >= 3 && SLP_IS_OBJ(args[2]) && SLP_OBJ_TYPE(args[2]) == SLP_OBJ_STRING) {
+        entrypoint = SLP_AS_STRING(args[2])->chars;
+        if (state->verbosity >= 2) printf("    -> Entrypoint: %s\n", entrypoint);
+    }
+    if (argc >= 4 && SLP_IS_OBJ(args[3]) && SLP_OBJ_TYPE(args[3]) == SLP_OBJ_STRING) {
+        SlpObjString *s = SLP_AS_STRING(args[3]);
+        bof_args = (unsigned char *)s->chars;
+        bof_args_size = s->length;
+        if (state->verbosity >= 2) printf("    -> Args length: %zu bytes\n", bof_args_size);
+    }
+    
+    if (bof_data && bof_size > 0) {
+        bof_run(bof_data, bof_size, entrypoint, bof_args, bof_args_size);
+    }
+    
     return SLP_NULL_VAL;
 }
 
@@ -243,25 +270,26 @@ static SlpValue val_openf(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     REPLState *state = (REPLState *)ud;
     (void)vm;
     if (argc < 1 || !(SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING)) {
-        printf("[Debug] val_openf: Invalid arguments\n");
+        if (state->verbosity >= 2) printf("[Debug] val_openf: Invalid arguments\n");
         return SLP_NUM_VAL(-1);
     }
     const char *path = SLP_AS_STRING(args[0])->chars;
-    printf("[Debug] val_openf: Attempting to open path: '%s'\n", path);
+    if (state->verbosity >= 2) printf("[Debug] val_openf: Attempting to open path: '%s'\n", path);
 
     for (int i = 0; i < MAX_OPEN_FILES; i++) {
         if (!state->open_files[i]) {
             FILE *f = fopen(path, "rb");
             if (f) {
-                printf("[Debug] val_openf: Successfully opened '%s' as handle %d\n", path, i);
+                if (state->verbosity >= 2) printf("[Debug] val_openf: Successfully opened '%s' as handle %d\n", path, i);
                 state->open_files[i] = f;
                 return SLP_NUM_VAL(i);
             } else {
-                perror("[Debug] val_openf fopen failed");
+                if (state->verbosity >= 2) perror("[Debug] val_openf fopen failed");
             }
             break;
         }
     }
+    if (state->verbosity >= 2) printf("[Debug] val_openf: No free file handles\n");
     return SLP_NUM_VAL(-1);
 }
 
@@ -747,13 +775,31 @@ static void completion(const char *buf, int pos, bestlineCompletions *lc) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("Usage: %s <bundle.cna>\n", argv[0]);
+        printf("Usage: %s <bundle.cna> [-c \"command\"] [-i <beacon_id>] [-v|-vv]\n", argv[0]);
         return 0;
     }
 
     memset(&global_repl_state, 0, sizeof(global_repl_state));
+    global_repl_state.verbosity = 0; // Default quiet
 
     const char *script_file = argv[1];
+    const char *execute_cmd = NULL;
+    const char *interact_id = NULL;
+    const char *beacon_cmd = NULL;
+
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
+            execute_cmd = argv[++i];
+        } else if (strcmp(argv[i], "-id") == 0 && i + 1 < argc) {
+            interact_id = argv[++i];
+        } else if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {
+            beacon_cmd = argv[++i];
+        } else if (strcmp(argv[i], "-v") == 0) {
+            global_repl_state.verbosity = 1;
+        } else if (strcmp(argv[i], "-vv") == 0) {
+            global_repl_state.verbosity = 2;
+        }
+    }
     const char *last_slash = strrchr(script_file, '/');
     if (last_slash) {
         size_t dir_len = last_slash - script_file + 1;
@@ -836,10 +882,82 @@ int main(int argc, char **argv) {
     }
 
     printf("[+] Script loaded successfully.\n");
+
+    if (execute_cmd || beacon_cmd) {
+        if (beacon_cmd) {
+            const char *b_id = interact_id ? interact_id : "123";
+            aggressor_ensure_beacon(global_repl_state.ag_state, b_id);
+            
+            char *cmd_dup = strdup(beacon_cmd);
+            char *args_str = "";
+            char *space = strchr(cmd_dup, ' ');
+            if (space) {
+                *space = '\0';
+                args_str = space + 1;
+            }
+
+            int found = 0;
+            for (int i = 0; i < alias_count; i++) {
+                if (strcmp(alias_registry[i].name, cmd_dup) == 0) {
+                    found = 1;
+                    char eval_buf[4096];
+                    int len = snprintf(eval_buf, sizeof(eval_buf), "__alias_%s('%s'", cmd_dup, b_id);
+                    char *args_copy = strdup(args_str);
+                    char *token = strtok(args_copy, " \t\r\n");
+                    while (token) {
+                        int written = snprintf(eval_buf + len, sizeof(eval_buf) - len, ", '%s'", token);
+                        if (written > 0) len += written;
+                        token = strtok(NULL, " \t\r\n");
+                    }
+                    free(args_copy);
+                    snprintf(eval_buf + len, sizeof(eval_buf) - len, ");");
+
+                    vm->repl_mode = true;
+                    SlpResult res = slp_vm_interpret(vm, eval_buf);
+                    vm->repl_mode = false;
+                    
+                    aggressor_deinit(ag_state);
+                    slp_vm_free(vm);
+                    free(cmd_dup);
+                    return (res == SLP_OK) ? 0 : 1;
+                }
+            }
+            if (!found) {
+                printf("[-] Beacon command '%s' not registered as an alias.\n", cmd_dup);
+                free(cmd_dup);
+                aggressor_deinit(ag_state);
+                slp_vm_free(vm);
+                return 1;
+            }
+        } else {
+            vm->repl_mode = true;
+            SlpResult res = slp_vm_interpret(vm, execute_cmd);
+            if (res == SLP_OK) {
+                SlpValue result = slp_vm_pop(vm);
+                if (!SLP_IS_NULL(result)) {
+                    printf("\x1b[90m=>\x1b[0m ");
+                    pry_print_value(result);
+                    printf("\n");
+                }
+            }
+            aggressor_deinit(ag_state);
+            slp_vm_free(vm);
+            return (res == SLP_OK) ? 0 : 1;
+        }
+    }
+
     printf("\n\x1b[32m=== Aggressor REPL ===\x1b[0m\n");
     printf("Base mode: Aggressor/Sleep script evaluation. Type 'exit' to quit.\n");
     printf("To emulate a beacon console, type: interact <beacon_id>\n");
     printf("Registered aliases: %d, events: %d\n\n", alias_count, event_count);
+
+    if (interact_id) {
+        strncpy(global_repl_state.current_beacon_id, interact_id, sizeof(global_repl_state.current_beacon_id) - 1);
+        global_repl_state.current_beacon_id[sizeof(global_repl_state.current_beacon_id) - 1] = '\0';
+        global_repl_state.mode = REPL_MODE_BEACON;
+        aggressor_ensure_beacon(global_repl_state.ag_state, global_repl_state.current_beacon_id);
+        printf("[*] Auto-interacting with beacon %s. Type 'back' to return.\n", global_repl_state.current_beacon_id);
+    }
 
     bestlineSetCompletionCallback(completion);
     bestlineSetHintsCallback(hints);

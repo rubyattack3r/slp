@@ -1,8 +1,8 @@
 CC ?= gcc
 CXX ?= g++
 
-CFLAGS = -g -O0 -std=c99 -Wall -Wextra -Iinclude -Ideps/bestline -Iextensions/aggressor -Iextensions/stdlib
-CXXFLAGS = -std=c++11 -Wall -Wextra -Iinclude -I. -Iextensions/aggressor -Iextensions/stdlib
+CFLAGS = -g -O0 -std=c99 -Wall -Wextra -Iinclude -Ideps/bestline -Iextensions/aggressor -Iextensions/stdlib -Iextensions/bof
+CXXFLAGS = -std=c++11 -Wall -Wextra -Iinclude -I. -Iextensions/aggressor -Iextensions/stdlib -Iextensions/bof
 
 SRC = $(wildcard src/*.c)
 OBJ = $(SRC:.c=.o)
@@ -15,12 +15,16 @@ AGGRESSOR_OBJ = extensions/aggressor/aggressor.o
 STDLIB_SRC = extensions/stdlib/stdlib.c
 STDLIB_OBJ = extensions/stdlib/stdlib.o
 
+# Extension: bof
+BOF_SRC = extensions/bof/bof.c extensions/bof/coff.c
+BOF_OBJ = extensions/bof/bof.o extensions/bof/coff.o
+
 TEST_SRC = $(wildcard tests/*.cpp)
 TEST_OBJ = $(TEST_SRC:.cpp=.o)
 
 .PHONY: all clean test bench amalgamate slp cna_bundler cna_validator aggressor tools slp_lib libaggressor test_runner bench_slp slp_fmt slpd validate
 
-all: slp_lib libaggressor slp tools amalgamate
+all: slp_lib libaggressor libbof slp tools amalgamate
 
 # Static library of the C implementation
 slp_lib: bin/libslp.a
@@ -35,6 +39,13 @@ libaggressor: bin/libaggressor.a
 bin/libaggressor.a: $(AGGRESSOR_OBJ)
 	@mkdir -p bin
 	ar rcs $@ $(AGGRESSOR_OBJ)
+
+# Static library of the BOF loader
+libbof: bin/libbof.a
+
+bin/libbof.a: $(BOF_OBJ)
+	@mkdir -p bin
+	ar rcs $@ $(BOF_OBJ)
 
 
 %.o: %.c
@@ -88,9 +99,9 @@ bin/cna_validator: $(OBJ) $(AGGRESSOR_OBJ) $(STDLIB_OBJ) tools/cna_validator.c
 
 aggressor: bin/aggressor
 
-bin/aggressor: $(OBJ) $(AGGRESSOR_OBJ) $(STDLIB_OBJ) tools/aggressor.c deps/bestline/bestline.c
+bin/aggressor: $(OBJ) $(AGGRESSOR_OBJ) $(STDLIB_OBJ) $(BOF_OBJ) tools/aggressor.c deps/bestline/bestline.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o $@ tools/aggressor.c deps/bestline/bestline.c $(OBJ) $(AGGRESSOR_OBJ) $(STDLIB_OBJ)
+	$(CC) $(CFLAGS) -o $@ tools/aggressor.c deps/bestline/bestline.c $(OBJ) $(AGGRESSOR_OBJ) $(STDLIB_OBJ) $(BOF_OBJ)
 
 slp_fmt: bin/slp_fmt
 

@@ -136,6 +136,26 @@ The `bench_slp` runs standard performance tests on the SlpVM core.
 
 ---
 
+## Cross-Compiling for Windows
+
+Because the BOF Loader relies on native Windows APIs to execute payloads in reality, you will likely want to build the tool suite for Windows. This project provides a fully provisioned cross-compilation environment using **Nix**.
+
+If you have Nix installed, you can drop into a shell containing the MinGW-w64 cross-compilers by running `nix develop`. Because the `Makefile` respects the `CC` and `CXX` environment variables, cross-compiling is as simple as:
+
+**For 64-bit Windows (x86_64):**
+```bash
+nix develop -c make clean tools CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++
+```
+
+**For 32-bit Windows (i686):**
+```bash
+nix develop -c make clean tools CC=i686-w64-mingw32-gcc CXX=i686-w64-mingw32-g++
+```
+
+*Note: The generated binaries in the `bin/` directory will be standard Windows PE executables, even though they will lack the `.exe` extension on your host OS. You may wish to rename them before moving them to a Windows target.*
+
+---
+
 ## CI/CD Pipeline Integration
 
 The project uses `make` and `bin/cna_bundler` directly to build and bundle projects:
