@@ -230,12 +230,169 @@ static const char *copy_unquoted_lexeme(SlpParser *parser, SlpToken *token) {
     return str;
 }
 
+static char *duplicate_string(SlpParser *parser, const char *src, size_t len) {
+    char *dest = (char *)parser->allocator->reallocate(NULL, len + 1, NULL);
+    if (dest) {
+        slp_utils_memcpy(dest, src, len);
+        dest[len] = '\0';
+    }
+    return dest;
+}
+
+static SlpASTNode *parse_double_quoted_string(SlpParser *parser, SlpToken *token) {
+    if (token->length < 2) {
+        SlpASTNode *node = allocate_node(parser, SLP_AST_STRING);
+        node->as.string_val = duplicate_string(parser, "", 0);
+        return node;
+    }
+
+    const char *src = token->start + 1;
+    size_t inner_len = token->length - 2;
+    const char *end = src + inner_len;
+
+    char *lit_buf = (char *)parser->allocator->reallocate(NULL, inner_len + 1, NULL);
+    if (!lit_buf) return NULL;
+    size_t lit_len = 0;
+
+    SlpASTNode *parts[512];
+    int part_count = 0;
+
+    const char *p = src;
+    while (p < end) {
+        // 1. Backslash escapes
+        if (*p == '\\' && p + 1 < end) {
+            char next = p[1];
+            if (next == '$' || next == '@' || next == '%' || next == '\\' || next == '"' || next == '\'') {
+                lit_buf[lit_len++] = next;
+                p += 2;
+            } else {
+                switch (next) {
+                    case 'n': lit_buf[lit_len++] = '\n'; break;
+                    case 't': lit_buf[lit_len++] = '\t'; break;
+                    case 'r': lit_buf[lit_len++] = '\r'; break;
+                    default: lit_buf[lit_len++] = '\\'; lit_buf[lit_len++] = next; break;
+                }
+                p += 2;
+            }
+            continue;
+        }
+
+        // 2. $+ operator (strip preceding/succeeding spaces)
+        if (*p == '$' && p + 1 < end && p[1] == '+') {
+            // Strip trailing spaces from our collected literal buffer
+            while (lit_len > 0 && (lit_buf[lit_len - 1] == ' ' || lit_buf[lit_len - 1] == '\t')) {
+                lit_len--;
+            }
+            // Flush literal buffer if not empty
+            if (lit_len > 0) {
+                lit_buf[lit_len] = '\0';
+                SlpASTNode *node = allocate_node(parser, SLP_AST_STRING);
+                node->as.string_val = duplicate_string(parser, lit_buf, lit_len);
+                parts[part_count++] = node;
+                lit_len = 0;
+            }
+
+            p += 2; // skip $+
+
+            // Skip leading spaces/tabs after $+
+            while (p < end && (*p == ' ' || *p == '\t')) {
+                p++;
+            }
+            continue;
+        }
+
+        // 3. Variable interpolation
+        if ((*p == '$' || *p == '@' || *p == '%') && p + 1 < end) {
+            char sigil = *p;
+            const char *var_start = p + 1;
+            const char *var_p = var_start;
+            while (var_p < end && ((*var_p >= 'a' && *var_p <= 'z') || 
+                                   (*var_p >= 'A' && *var_p <= 'Z') || 
+                                   (*var_p >= '0' && *var_p <= '9') || 
+                                   *var_p == '_')) {
+                var_p++;
+            }
+            if (var_p > var_start) {
+                // We have a valid variable name!
+                // First flush the literal buffer collected so far
+                if (lit_len > 0) {
+                    lit_buf[lit_len] = '\0';
+                    SlpASTNode *node = allocate_node(parser, SLP_AST_STRING);
+                    node->as.string_val = duplicate_string(parser, lit_buf, lit_len);
+                    parts[part_count++] = node;
+                    lit_len = 0;
+                }
+
+                // Create the variable AST node
+                size_t var_name_len = var_p - var_start;
+                char *var_name = duplicate_string(parser, var_start, var_name_len);
+
+                SlpASTNode *node = NULL;
+                if (sigil == '$') {
+                    node = allocate_node(parser, SLP_AST_SCALAR);
+                } else if (sigil == '@') {
+                    node = allocate_node(parser, SLP_AST_ARRAY);
+                } else {
+                    node = allocate_node(parser, SLP_AST_HASHTABLE);
+                }
+                node->as.string_val = var_name;
+                parts[part_count++] = node;
+
+                p = var_p;
+                continue;
+            }
+        }
+
+        // 4. Regular character
+        lit_buf[lit_len++] = *p;
+        p++;
+    }
+
+    // Flush any remaining literal characters
+    if (lit_len > 0) {
+        lit_buf[lit_len] = '\0';
+        SlpASTNode *node = allocate_node(parser, SLP_AST_STRING);
+        node->as.string_val = duplicate_string(parser, lit_buf, lit_len);
+        parts[part_count++] = node;
+    }
+
+    parser->allocator->reallocate(lit_buf, 0, NULL);
+
+    // Build the tree of concatenations
+    if (part_count == 0) {
+        SlpASTNode *node = allocate_node(parser, SLP_AST_STRING);
+        node->as.string_val = duplicate_string(parser, "", 0);
+        return node;
+    }
+    if (part_count == 1) {
+        return parts[0];
+    }
+
+    SlpASTNode *result = parts[0];
+    for (int i = 1; i < part_count; i++) {
+        SlpASTNode *binop = allocate_node(parser, SLP_AST_BINOP);
+        binop->as.binop.left = result;
+        binop->as.binop.right = parts[i];
+        binop->as.binop.op.type = SLP_TOKEN_DOT;
+        binop->as.binop.op.start = ".";
+        binop->as.binop.op.length = 1;
+        binop->as.binop.op.line = token->line;
+        binop->as.binop.negate = false;
+        result = binop;
+    }
+    return result;
+}
+
 static SlpASTNode *string_val(SlpParser *parser, SlpASTNode *left,
                                  bool canAssign) {
   (void)canAssign;
   (void)left;
+  SlpToken token = parser->previous;
+  if (token.type == SLP_TOKEN_STRING) {
+      return parse_double_quoted_string(parser, &token);
+  }
   SlpASTNode *node = allocate_node(parser, SLP_AST_STRING);
-  node->as.string_val = copy_unquoted_lexeme(parser, &parser->previous);
+  node->as.string_val = copy_unquoted_lexeme(parser, &token);
   return node;
 }
 

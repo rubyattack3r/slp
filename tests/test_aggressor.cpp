@@ -48,7 +48,7 @@ TEST_CASE("libaggressor: init and free") {
     AggressorState *state = aggressor_init(vm, &cfg);
     REQUIRE(state != nullptr);
 
-    free(state);
+    aggressor_deinit(state);
     slp_vm_free(vm);
 }
 
@@ -76,7 +76,7 @@ TEST_CASE("libaggressor: fallback and overrides") {
     CHECK(r == SLP_OK);
     CHECK(test_override_called == 1);
 
-    free(state);
+    aggressor_deinit(state);
     slp_vm_free(vm);
 }
 
@@ -110,6 +110,6 @@ TEST_CASE("libaggressor: builtin pure utilities") {
     r = slp_vm_interpret(vm, "replace(\"foobar\", \"foo\", \"baz\");");
     CHECK(r == SLP_OK);
 
-    free(state);
+    aggressor_deinit(state);
     slp_vm_free(vm);
 }

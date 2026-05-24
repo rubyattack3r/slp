@@ -39,6 +39,11 @@ struct AggressorState {
     int override_count;
     TrampolineSlot trampoline_names[AGGRESSOR_MAX_TRAMPOLINES];
     int trampoline_count;
+
+    /* Dynamic command registry */
+    AggressorCommand *commands;
+    int command_count;
+    int command_capacity;
 };
 
 static void *aggressor_alloc(SlpVM *vm, size_t size) {
@@ -66,6 +71,60 @@ static SlpValue default_fallback(SlpVM *vm, const char *func_name,
     return SLP_NULL_VAL;
 }
 
+void aggressor_register_command(AggressorState *state, const char *name, const char *description, const char *help) {
+    if (!state || !name) return;
+
+    /* Check if already exists; if so, update in place */
+    for (int i = 0; i < state->command_count; i++) {
+        if (strcmp(state->commands[i].name, name) == 0) {
+            free(state->commands[i].description);
+            free(state->commands[i].help);
+            state->commands[i].description = strdup(description ? description : "");
+            state->commands[i].help = strdup(help ? help : "");
+            return;
+        }
+    }
+
+    /* Expand array dynamically if capacity is reached */
+    if (state->command_count >= state->command_capacity) {
+        int new_capacity = state->command_capacity == 0 ? 8 : state->command_capacity * 2;
+        AggressorCommand *new_commands = realloc(state->commands, new_capacity * sizeof(AggressorCommand));
+        if (new_commands) {
+            state->commands = new_commands;
+            state->command_capacity = new_capacity;
+        } else {
+            return;
+        }
+    }
+
+    /* Add new command entry */
+    AggressorCommand *cmd = &state->commands[state->command_count++];
+    cmd->name = strdup(name);
+    cmd->description = strdup(description ? description : "");
+    cmd->help = strdup(help ? help : "");
+}
+
+const char *aggressor_get_command_help(AggressorState *state, const char *name) {
+    if (!state || !name) return NULL;
+    for (int i = 0; i < state->command_count; i++) {
+        if (strcmp(state->commands[i].name, name) == 0) {
+            return state->commands[i].help;
+        }
+    }
+    return NULL;
+}
+
+void aggressor_deinit(AggressorState *state) {
+    if (!state) return;
+    for (int i = 0; i < state->command_count; i++) {
+        free(state->commands[i].name);
+        free(state->commands[i].description);
+        free(state->commands[i].help);
+    }
+    free(state->commands);
+    free(state);
+}
+
 /* Dispatch logic shared by all trampolines */
 static SlpValue dispatch(SlpVM *vm, AggressorState *state, const char *name,
                              SlpValue *args, int argc) {
@@ -73,6 +132,25 @@ static SlpValue dispatch(SlpVM *vm, AggressorState *state, const char *name,
     AggressorNativeFn override = find_override(state, name);
     if (override) {
         return override(vm, args, argc, state->config.user_data);
+    }
+
+    /* Default dynamic stateful fallback for beacon_command_register and beacon_command_detail */
+    if (strcmp(name, "beacon_command_register") == 0) {
+        if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
+            const char *cmd_name = SLP_AS_STRING(args[0])->chars;
+            const char *description = (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) ? SLP_AS_STRING(args[1])->chars : "";
+            const char *help = (argc >= 3 && SLP_IS_OBJ(args[2]) && SLP_OBJ_TYPE(args[2]) == SLP_OBJ_STRING) ? SLP_AS_STRING(args[2])->chars : "";
+            aggressor_register_command(state, cmd_name, description, help);
+        }
+    } else if (strcmp(name, "beacon_command_detail") == 0) {
+        if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
+            const char *cmd_name = SLP_AS_STRING(args[0])->chars;
+            const char *help = aggressor_get_command_help(state, cmd_name);
+            if (help) {
+                return SLP_OBJ_VAL(slp_vm_copy_string(vm, help, strlen(help)));
+            }
+        }
+        return SLP_OBJ_VAL(slp_vm_copy_string(vm, "Mock details", 12));
     }
 
     /* Fall through to consumer fallback */
@@ -193,6 +271,30 @@ static SlpValue builtin_istrue(SlpVM *vm, SlpValue *args, int argc) {
     (void)vm;
     if (argc < 1) return SLP_NUM_VAL(0);
     return SLP_NUM_VAL(SLP_IS_TRUE(args[0]) ? 1 : 0);
+}
+
+static SlpValue builtin_isadmin(SlpVM *vm, SlpValue *args, int argc) {
+    (void)vm; (void)args; (void)argc;
+    return SLP_NUM_VAL(1);
+}
+
+static SlpValue builtin_isnumber(SlpVM *vm, SlpValue *args, int argc) {
+    (void)vm;
+    if (argc < 1) return SLP_NUM_VAL(0);
+    if (SLP_IS_NUM(args[0])) return SLP_NUM_VAL(1);
+    if (SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
+        const char *s = SLP_AS_STRING(args[0])->chars;
+        if (!s || *s == '\0') return SLP_NUM_VAL(0);
+        char *endptr;
+        strtod(s, &endptr);
+        return SLP_NUM_VAL(*endptr == '\0' ? 1 : 0);
+    }
+    return SLP_NUM_VAL(0);
+}
+
+static SlpValue builtin_ismatch(SlpVM *vm, SlpValue *args, int argc) {
+    (void)vm; (void)args; (void)argc;
+    return SLP_NUM_VAL(1);
 }
 
 static SlpValue builtin_strlen(SlpVM *vm, SlpValue *args, int argc) {
@@ -333,6 +435,9 @@ static SlpValue builtin_replace(SlpVM *vm, SlpValue *args, int argc) {
 static void register_builtins(SlpVM *vm) {
     slp_vm_register_native(vm, "iff",     builtin_iff);
     slp_vm_register_native(vm, "-istrue", builtin_istrue);
+    slp_vm_register_native(vm, "-isadmin", builtin_isadmin);
+    slp_vm_register_native(vm, "-isnumber", builtin_isnumber);
+    slp_vm_register_native(vm, "-ismatch", builtin_ismatch);
     slp_vm_register_native(vm, "strlen",  builtin_strlen);
     slp_vm_register_native(vm, "int",     builtin_int);
     slp_vm_register_native(vm, "size",    builtin_size);

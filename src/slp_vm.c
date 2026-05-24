@@ -339,15 +339,39 @@ static bool call_closure(SlpVM *vm, SlpObjClosure *closure, int arg_count) {
         return false;
     }
     
-    // Pad stack with $null so we have at least 9 argument slots (for $1 to $9)
-    for (int i = arg_count; i < 9; i++) {
-        slp_vm_push(vm, SLP_NULL_VAL);
+    /* Construct array '_' containing all passed arguments */
+    SlpObjArray *arr = slp_obj_array_new(vm->allocator);
+    if (!arr) {
+        slp_vm_runtime_error(vm, "Out of memory.");
+        return false;
     }
-    // Note: The frame's slots pointer should still point to the closure object, 
-    // which was pushed BEFORE the arg_count arguments.
-    // So if arg_count was 2, we pushed 7 nulls. The total arguments is now max(arg_count, 9).
-    // Actually, `call_value` popped nothing. The stack has: [closure] [arg1] ... [argN] [nulls...]
-    int frame_slots = (arg_count < 9) ? 9 : arg_count;
+    arr->obj.next = vm->objects;
+    vm->objects = &arr->obj;
+
+    for (int i = 0; i < arg_count; i++) {
+        slp_obj_array_push(vm->allocator, arr, vm->stack_top[-arg_count + i]);
+    }
+
+    if (arg_count < 9) {
+        /* Pad stack with $null so we have at least 9 argument slots (for $1 to $9) */
+        for (int i = arg_count; i < 9; i++) {
+            slp_vm_push(vm, SLP_NULL_VAL);
+        }
+        /* Push the @_ array as slot 10 */
+        slp_vm_push(vm, SLP_OBJ_VAL(arr));
+    } else {
+        /* arg_count >= 9. Insert array '_' at slot 10 (index 10 from frame slots)
+         * Stack layout currently has: [closure] [arg1] ... [arg9] [arg10] ... [argN]
+         * We want to shift [arg10] ... [argN] to the right to make space for arr at slot 10. */
+        int shift_count = arg_count - 9;
+        slp_vm_push(vm, SLP_NULL_VAL); /* grow stack by 1 */
+        for (int i = shift_count - 1; i >= 0; i--) {
+            vm->stack_top[-1 - i] = vm->stack_top[-2 - i];
+        }
+        vm->stack_top[-shift_count - 1] = SLP_OBJ_VAL(arr);
+    }
+
+    int frame_slots = (arg_count < 9) ? 10 : arg_count + 1;
     
     SlpCallFrame *frame = &vm->frames[vm->frame_count++];
     frame->closure = closure;

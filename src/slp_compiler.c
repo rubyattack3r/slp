@@ -87,6 +87,10 @@ static void init_compiler(SlpCompiler *compiler, SlpCompiler *enclosing,
             arg_local->is_captured = false;
             arg_local->name = intern_str(compiler, name, 1);
         }
+        SlpLocal *arg_local = &compiler->locals[compiler->local_count++];
+        arg_local->depth = 0;
+        arg_local->is_captured = false;
+        arg_local->name = intern_str(compiler, "_", 1);
     }
 }
 
@@ -325,6 +329,13 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
         case SLP_TOKEN_BANG:  emit_byte(compiler, OP_NOT, line); break;
         case SLP_TOKEN_INC:   emit_byte(compiler, OP_INCREMENT, line); break;
         case SLP_TOKEN_DEC:   emit_byte(compiler, OP_DECREMENT, line); break;
+        case SLP_TOKEN_UNARY_PREDICATE_BRIDGE: {
+            SlpObjString *pred_name = intern_str(compiler,
+                node->as.unaryop.op.start, (uint32_t)node->as.unaryop.op.length);
+            emit_byte(compiler, OP_UNARY_PREDICATE, line);
+            emit_short(compiler, make_constant(compiler, SLP_OBJ_VAL(pred_name)), line);
+            break;
+        }
         default: break;
         }
         break;

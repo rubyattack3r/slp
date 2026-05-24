@@ -349,3 +349,40 @@ TEST_CASE("Bytecode: truncated data returns null") {
     SlpObjFunction *fn = slp_bytecode_deserialize_function(&reader, &tc_allocator);
     CHECK(fn == nullptr);
 }
+
+TEST_CASE("Compiler: @_ local variable resolution") {
+    SlpVM *vm = slp_vm_new(&tc_allocator);
+    SlpObjFunction *top_fn = compile_source("sub foo { @_ = $null; }", vm);
+    REQUIRE(top_fn != nullptr);
+    
+    // Find the OP_CLOSURE in the top-level function to get the foo sub function
+    SlpChunk *top_chunk = top_fn->chunk;
+    bool found_closure = false;
+    SlpObjFunction *sub_fn = nullptr;
+    for (int i = 0; i < top_chunk->count - 2; i++) {
+        if (top_chunk->code[i] == OP_CLOSURE) {
+            uint16_t idx = (top_chunk->code[i + 1] << 8) | top_chunk->code[i + 2];
+            SlpValue val = top_chunk->constants[idx];
+            if (SLP_IS_OBJ(val) && SLP_OBJ_TYPE(val) == SLP_OBJ_FUNCTION) {
+                sub_fn = SLP_AS_FUNCTION(val);
+                found_closure = true;
+                break;
+            }
+        }
+    }
+    REQUIRE(found_closure);
+    REQUIRE(sub_fn != nullptr);
+
+    // Verify that @_ = $null; in the sub_fn chunk compiles to OP_STORE_LOCAL with slot 10
+    SlpChunk *sub_chunk = sub_fn->chunk;
+    bool found_store_local_10 = false;
+    for (int i = 0; i < sub_chunk->count - 1; i++) {
+        if (sub_chunk->code[i] == OP_STORE_LOCAL && sub_chunk->code[i + 1] == 10) {
+            found_store_local_10 = true;
+            break;
+        }
+    }
+    CHECK(found_store_local_10);
+
+    slp_vm_free(vm);
+}

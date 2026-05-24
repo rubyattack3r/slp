@@ -191,6 +191,7 @@ struct SlpASTNode {
     } import_stmt;
 
   } as;
+  bool is_rewritten;
 };
 
 typedef struct {

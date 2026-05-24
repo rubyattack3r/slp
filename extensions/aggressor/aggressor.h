@@ -98,6 +98,15 @@ typedef struct {
 typedef struct AggressorState AggressorState;
 
 /*
+ * Dynamic metadata structure for a registered beacon command.
+ */
+typedef struct {
+    char *name;
+    char *description;
+    char *help;
+} AggressorCommand;
+
+/*
  * Initialize the Aggressor extension. Registers all known function names
  * into the VM using safe default stubs. Functions that are pure language
  * utilities (iff, strlen, substr, etc.) are registered with real
@@ -108,10 +117,29 @@ typedef struct AggressorState AggressorState;
 AggressorState *aggressor_init(SlpVM *vm, AggressorConfig *config);
 
 /*
+ * Deinitialize the Aggressor extension. Fully reclaims the state along with
+ * all dynamically registered commands and metadata to prevent memory leaks.
+ */
+void aggressor_deinit(AggressorState *state);
+
+/*
  * Override a single function after init. The provided function will be
  * called instead of the fallback for this specific function name.
  */
 void aggressor_set(AggressorState *state, const char *name, AggressorNativeFn fn);
+
+/*
+ * Register a beacon command dynamically with descriptions and usage help.
+ * If the command already exists, its description and help details are updated.
+ * Automatically resizes the dynamic backing array as needed.
+ */
+void aggressor_register_command(AggressorState *state, const char *name, const char *description, const char *help);
+
+/*
+ * Query the registered usage help string for a beacon command.
+ * Returns NULL if the command has not been registered.
+ */
+const char *aggressor_get_command_help(AggressorState *state, const char *name);
 
 /* -----------------------------------------------------------------------
  * Category-Based Overrides

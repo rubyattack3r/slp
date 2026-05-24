@@ -538,28 +538,6 @@ static void rewrite_pass(SlpASTNode* node, SymbolTable* symbols, const char* pre
                                 }
                             }
                         }
-                    } else if (strcmp(func_name, "script_resource") == 0 && node->as.call.arg_count > 0 && node->as.call.args[0]) {
-                        SlpASTNode* arg_node = node->as.call.args[0];
-                        bool is_arg_wrapped = (arg_node->type == SLP_AST_ARG);
-                        SlpASTNode* val_node = is_arg_wrapped ? arg_node->as.arg.value : arg_node;
-                        
-                        size_t path_len = strlen(rel_path) + 2;
-                        char* dir_str = symbols->allocator->reallocate(NULL, path_len, symbols->allocator->user_data);
-                        strcpy(dir_str, rel_path);
-                        strcat(dir_str, "/");
-                        
-                        SlpASTNode* prefix_node = slp_ast_build_node(SLP_AST_STRING, node->line, symbols->allocator);
-                        slp_ast_set_string_val(prefix_node, dir_str, symbols->allocator);
-                        symbols->allocator->reallocate(dir_str, 0, symbols->allocator->user_data);
-                        
-                        SlpASTNode* binop = slp_ast_build_node(SLP_AST_BINOP, node->line, symbols->allocator);
-                        slp_ast_set_binop_with_op(binop, prefix_node, val_node, ".", symbols->allocator);
-                        
-                        if (is_arg_wrapped) {
-                            arg_node->as.arg.value = binop;
-                        } else {
-                            node->as.call.args[0] = binop;
-                        }
                     }
                 }
             }
@@ -693,7 +671,69 @@ static char* read_file(const char* path) {
     return buffer;
 }
 
-static void inline_includes(SlpASTNode* node, SymbolTable* symbols, const char* prefix, const char* project_dir, const char* project_name, int depth);
+static char* get_directory_part(const char* path, SlpAllocator* allocator) {
+    const char* last_slash = strrchr(path, '/');
+    if (!last_slash) {
+        char* dir = allocator->reallocate(NULL, 2, allocator->user_data);
+        strcpy(dir, ".");
+        return dir;
+    }
+    size_t len = last_slash - path;
+    if (len == 0) {
+        char* dir = allocator->reallocate(NULL, 2, allocator->user_data);
+        strcpy(dir, "/");
+        return dir;
+    }
+    char* dir = allocator->reallocate(NULL, len + 1, allocator->user_data);
+    strncpy(dir, path, len);
+    dir[len] = '\0';
+    return dir;
+}
+
+static void rewrite_script_resources(SlpASTNode* node, const char* file_dir, SlpAllocator* allocator) {
+    if (!node) return;
+    if (node->is_rewritten) return;
+    
+    if (node->type == SLP_AST_CALL) {
+        if (node->as.call.target && node->as.call.target->type == SLP_AST_IDENTIFIER) {
+            const char* func_name = slp_ast_get_string(node->as.call.target);
+            if (func_name && strcmp(func_name, "script_resource") == 0 && node->as.call.arg_count > 0 && node->as.call.args[0]) {
+                SlpASTNode* arg_node = node->as.call.args[0];
+                bool is_arg_wrapped = (arg_node->type == SLP_AST_ARG);
+                SlpASTNode* val_node = is_arg_wrapped ? arg_node->as.arg.value : arg_node;
+                
+                size_t path_len = strlen(file_dir) + 2;
+                char* dir_str = allocator->reallocate(NULL, path_len, allocator->user_data);
+                strcpy(dir_str, file_dir);
+                strcat(dir_str, "/");
+                
+                SlpASTNode* prefix_node = slp_ast_build_node(SLP_AST_STRING, node->line, allocator);
+                slp_ast_set_string_val(prefix_node, dir_str, allocator);
+                allocator->reallocate(dir_str, 0, allocator->user_data);
+                
+                SlpASTNode* binop = slp_ast_build_node(SLP_AST_BINOP, node->line, allocator);
+                slp_ast_set_binop_with_op(binop, prefix_node, val_node, ".", allocator);
+                
+                if (is_arg_wrapped) {
+                    arg_node->as.arg.value = binop;
+                } else {
+                    node->as.call.args[0] = binop;
+                }
+                node->is_rewritten = true;
+            }
+        }
+    }
+    
+    SlpASTNode** children;
+    size_t count;
+    slp_ast_get_children(node, &children, &count, allocator);
+    for (size_t i = 0; i < count; i++) {
+        rewrite_script_resources(children[i], file_dir, allocator);
+    }
+    slp_ast_free_children(children, allocator);
+}
+
+static void inline_includes(SlpASTNode* node, SymbolTable* symbols, const char* prefix, const char* current_dir, const char* project_name, int depth);
 
 static SlpASTNode* process_file(const char* filepath, const char* prefix, const char* project_dir, const char* project_name, SymbolTable* symbols, int depth, SlpAllocator* allocator) {
     if (depth > 8) {
@@ -734,7 +774,11 @@ static SlpASTNode* process_file(const char* filepath, const char* prefix, const 
     }
     
     if (root) {
-        inline_includes(root, symbols, prefix, project_dir, project_name, depth);
+        char* current_dir = get_directory_part(filepath, allocator);
+        
+        inline_includes(root, symbols, prefix, current_dir, project_name, depth);
+        
+        rewrite_script_resources(root, current_dir, allocator);
         
         if (depth == 0) {
             scan_pass(root, symbols, true, project_name);
@@ -743,12 +787,14 @@ static SlpASTNode* process_file(const char* filepath, const char* prefix, const 
             size_t active_locals_count = 0;
             rewrite_pass(root, symbols, prefix, project_dir, project_name, &active_locals, &active_locals_count);
         }
+        
+        allocator->reallocate(current_dir, 0, allocator->user_data);
     }
     
     return root;
 }
 
-static void inline_includes(SlpASTNode* node, SymbolTable* symbols, const char* prefix, const char* project_dir, const char* project_name, int depth) {
+static void inline_includes(SlpASTNode* node, SymbolTable* symbols, const char* prefix, const char* current_dir, const char* project_name, int depth) {
     if (!node) return;
     
     if (node->type == SLP_AST_CALL) {
@@ -773,13 +819,13 @@ static void inline_includes(SlpASTNode* node, SymbolTable* symbols, const char* 
                 }
                 
                 if (inc_path) {
-                    size_t path_len = strlen(project_dir) + strlen(inc_path) + 2;
+                    size_t path_len = strlen(current_dir) + strlen(inc_path) + 2;
                     char* full_path = symbols->allocator->reallocate(NULL, path_len, symbols->allocator->user_data);
-                    strcpy(full_path, project_dir);
+                    strcpy(full_path, current_dir);
                     strcat(full_path, "/");
                     strcat(full_path, inc_path);
                     
-                    SlpASTNode* inc_root = process_file(full_path, prefix, project_dir, project_name, symbols, depth + 1, symbols->allocator);
+                    SlpASTNode* inc_root = process_file(full_path, prefix, current_dir, project_name, symbols, depth + 1, symbols->allocator);
                     symbols->allocator->reallocate(full_path, 0, symbols->allocator->user_data);
                     
                     if (inc_root) {
@@ -823,7 +869,7 @@ static void inline_includes(SlpASTNode* node, SymbolTable* symbols, const char* 
     size_t count;
     slp_ast_get_children(node, &children, &count, symbols->allocator);
     for (size_t i = 0; i < count; i++) {
-        inline_includes(children[i], symbols, prefix, project_dir, project_name, depth);
+        inline_includes(children[i], symbols, prefix, current_dir, project_name, depth);
     }
     slp_ast_free_children(children, symbols->allocator);
 }

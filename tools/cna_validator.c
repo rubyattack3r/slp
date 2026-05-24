@@ -296,6 +296,32 @@ static void alias_handler(SlpVM *vm, const char *keyword, const char *name,
  * These are AggressorNativeFn (with user_data), not SlpNativeFn.
  * ----------------------------------------------------------------------- */
 
+static SlpValue val_beacon_info(SlpVM *vm, SlpValue *args, int argc, void *ud) {
+    (void)args; (void)ud;
+    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) {
+        const char *key = SLP_AS_STRING(args[1])->chars;
+        if (strcmp(key, "barch") == 0) {
+            return SLP_OBJ_VAL(slp_vm_copy_string(vm, "x64", 3));
+        } else if (strcmp(key, "isadmin") == 0) {
+            return SLP_NUM_VAL(1);
+        }
+    }
+    return SLP_OBJ_VAL(slp_vm_copy_string(vm, "mock_beacon_info_val", 20));
+}
+
+static SlpValue val_deleteFile(SlpVM *vm, SlpValue *args, int argc, void *ud) {
+    (void)vm; (void)args; (void)argc; (void)ud;
+    return SLP_BOOL_VAL(true);
+}
+
+static SlpValue val_readAll(SlpVM *vm, SlpValue *args, int argc, void *ud) {
+    (void)args; (void)argc; (void)ud;
+    SlpObjArray *arr = slp_obj_array_new(vm->allocator);
+    slp_obj_array_push(vm->allocator, arr, SLP_OBJ_VAL(slp_vm_copy_string(vm, "line1", 5)));
+    slp_obj_array_push(vm->allocator, arr, SLP_OBJ_VAL(slp_vm_copy_string(vm, "line2", 5)));
+    return SLP_OBJ_VAL(arr);
+}
+
 static SlpValue val_barch(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     (void)args; (void)argc; (void)ud;
     return SLP_OBJ_VAL(slp_vm_copy_string(vm, "x64", 3));
@@ -349,10 +375,21 @@ static SlpValue val_berror(SlpVM *vm, SlpValue *args, int argc, void *ud) {
 }
 
 static SlpValue val_beacon_command_register(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    ValidatorState *state = (ValidatorState *)ud;
-    (void)vm;
-    if (state->format == FORMAT_TEXT && argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING)
-        printf("[+] Registered command: %s\n", SLP_AS_STRING(args[0])->chars);
+    ValidatorState *v_state = (ValidatorState *)ud;
+    if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
+        const char *name = SLP_AS_STRING(args[0])->chars;
+        if (v_state && v_state->format == FORMAT_TEXT) {
+            printf("[+] Registered command: %s\n", name);
+        }
+
+        int64_t addr = slp_vm_ffi_get_long(vm, 255);
+        AggressorState *state = (AggressorState *)(uintptr_t)addr;
+        if (state) {
+            const char *description = (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) ? SLP_AS_STRING(args[1])->chars : "";
+            const char *help = (argc >= 3 && SLP_IS_OBJ(args[2]) && SLP_OBJ_TYPE(args[2]) == SLP_OBJ_STRING) ? SLP_AS_STRING(args[2])->chars : "";
+            aggressor_register_command(state, name, description, help);
+        }
+    }
     return SLP_NULL_VAL;
 }
 
@@ -372,7 +409,18 @@ static SlpValue val_beacon_inline_execute(SlpVM *vm, SlpValue *args, int argc, v
 }
 
 static SlpValue val_beacon_command_detail(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    (void)args; (void)argc; (void)ud;
+    (void)ud;
+    if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
+        const char *name = SLP_AS_STRING(args[0])->chars;
+        int64_t addr = slp_vm_ffi_get_long(vm, 255);
+        AggressorState *state = (AggressorState *)(uintptr_t)addr;
+        if (state) {
+            const char *help = aggressor_get_command_help(state, name);
+            if (help) {
+                return SLP_OBJ_VAL(slp_vm_copy_string(vm, help, strlen(help)));
+            }
+        }
+    }
     return SLP_OBJ_VAL(slp_vm_copy_string(vm, "Mock details", 12));
 }
 
@@ -525,6 +573,9 @@ int main(int argc, char **argv) {
 
     /* Override functions with validation-aware implementations */
     aggressor_set(ag_state, "barch",                    val_barch);
+    aggressor_set(ag_state, "beacon_info",              val_beacon_info);
+    aggressor_set(ag_state, "deleteFile",               val_deleteFile);
+    aggressor_set(ag_state, "readAll",                  val_readAll);
     aggressor_set(ag_state, "script_resource",          val_script_resource);
     aggressor_set(ag_state, "bof_pack",                 val_bof_pack);
     aggressor_set(ag_state, "btask",                    val_btask);
@@ -558,7 +609,7 @@ int main(int argc, char **argv) {
         } else if (state.format == FORMAT_JUNIT) {
             print_junit_report(&state, 0, 0, NULL);
         }
-        free(ag_state);
+        aggressor_deinit(ag_state);
         slp_vm_free(vm);
         return 1;
     }
@@ -582,7 +633,7 @@ int main(int argc, char **argv) {
         } else if (state.format == FORMAT_JUNIT) {
             print_junit_report(&state, 0, 0, NULL);
         }
-        free(ag_state);
+        aggressor_deinit(ag_state);
         slp_vm_free(vm);
         return 1;
     }
@@ -624,7 +675,7 @@ int main(int argc, char **argv) {
         print_junit_report(&state, alias_count, alias_count, alias_registry);
     }
 
-    free(ag_state);
+    aggressor_deinit(ag_state);
     slp_vm_free(vm);
     return state.validation_failed ? 1 : 0;
 }

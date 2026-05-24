@@ -157,3 +157,46 @@ TEST_CASE("VM: interpret comparison operators") {
     CHECK(r == SLP_OK);
     slp_vm_free(vm);
 }
+
+TEST_CASE("VM: @_ local variable argument array") {
+    SlpVM *vm = slp_vm_new(&vm_allocator);
+    slp_vm_register_bridge_type(vm, "sub", nullptr, nullptr);
+
+    // 1. Test size of @_ with 0 arguments
+    {
+        SlpResult result = slp_vm_interpret(vm,
+            "sub test_arg0 { $result0 = size(@_); }\n"
+            "test_arg0();");
+        REQUIRE(result == SLP_OK);
+        SlpObjString *name = slp_vm_copy_string(vm, "result0", 7);
+        SlpValue val = slp_obj_hash_get(vm->globals, SLP_OBJ_VAL(name));
+        REQUIRE(SLP_IS_NUM(val));
+        CHECK(SLP_AS_NUM(val) == 0.0);
+    }
+
+    // 2. Test size of @_ with 3 arguments
+    {
+        SlpResult result = slp_vm_interpret(vm,
+            "sub test_arg3 { $result3 = size(@_); }\n"
+            "test_arg3(10, 20, 30);");
+        REQUIRE(result == SLP_OK);
+        SlpObjString *name = slp_vm_copy_string(vm, "result3", 7);
+        SlpValue val = slp_obj_hash_get(vm->globals, SLP_OBJ_VAL(name));
+        REQUIRE(SLP_IS_NUM(val));
+        CHECK(SLP_AS_NUM(val) == 3.0);
+    }
+
+    // 3. Test shifting and size of @_ with 11 arguments (greater than 9!)
+    {
+        SlpResult result = slp_vm_interpret(vm,
+            "sub test_arg11 { $result11 = size(@_); }\n"
+            "test_arg11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);");
+        REQUIRE(result == SLP_OK);
+        SlpObjString *name = slp_vm_copy_string(vm, "result11", 8);
+        SlpValue val = slp_obj_hash_get(vm->globals, SLP_OBJ_VAL(name));
+        REQUIRE(SLP_IS_NUM(val));
+        CHECK(SLP_AS_NUM(val) == 11.0);
+    }
+
+    slp_vm_free(vm);
+}

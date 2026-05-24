@@ -35,6 +35,7 @@ typedef struct {
 typedef struct {
     char current_alias[128];
     FILE *open_files[MAX_OPEN_FILES];
+    char script_dir[512];
 } REPLState;
 
 static AliasRecord alias_registry[MAX_ALIASES];
@@ -117,17 +118,45 @@ static void alias_handler(SlpVM *vm, const char *keyword, const char *name,
  * Mocks & Overrides
  * ----------------------------------------------------------------------- */
 
+static SlpValue val_beacon_info(SlpVM *vm, SlpValue *args, int argc, void *ud) {
+    (void)args; (void)ud;
+    if (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) {
+        const char *key = SLP_AS_STRING(args[1])->chars;
+        if (strcmp(key, "barch") == 0) {
+            return SLP_OBJ_VAL(slp_vm_copy_string(vm, "x64", 3));
+        } else if (strcmp(key, "isadmin") == 0) {
+            return SLP_NUM_VAL(1);
+        }
+    }
+    return SLP_OBJ_VAL(slp_vm_copy_string(vm, "mock_beacon_info_val", 20));
+}
+
+static SlpValue val_deleteFile(SlpVM *vm, SlpValue *args, int argc, void *ud) {
+    (void)vm; (void)args; (void)argc; (void)ud;
+    return SLP_BOOL_VAL(true);
+}
+
+static SlpValue val_readAll(SlpVM *vm, SlpValue *args, int argc, void *ud) {
+    (void)args; (void)argc; (void)ud;
+    SlpObjArray *arr = slp_obj_array_new(vm->allocator);
+    slp_obj_array_push(vm->allocator, arr, SLP_OBJ_VAL(slp_vm_copy_string(vm, "line1", 5)));
+    slp_obj_array_push(vm->allocator, arr, SLP_OBJ_VAL(slp_vm_copy_string(vm, "line2", 5)));
+    return SLP_OBJ_VAL(arr);
+}
+
 static SlpValue val_barch(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     (void)args; (void)argc; (void)ud;
     return SLP_OBJ_VAL(slp_vm_copy_string(vm, "x64", 3));
 }
 
 static SlpValue val_script_resource(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    (void)ud;
+    REPLState *state = (REPLState *)ud;
     if (argc < 1 || !(SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING))
         return SLP_NULL_VAL;
     SlpObjString *str = SLP_AS_STRING(args[0]);
-    return SLP_OBJ_VAL(slp_vm_copy_string(vm, str->chars, str->length));
+    char resolved[1024];
+    snprintf(resolved, sizeof(resolved), "%s%s", state->script_dir, str->chars);
+    return SLP_OBJ_VAL(slp_vm_copy_string(vm, resolved, strlen(resolved)));
 }
 
 static SlpValue val_bof_pack(SlpVM *vm, SlpValue *args, int argc, void *ud) {
@@ -157,9 +186,19 @@ static SlpValue val_berror(SlpVM *vm, SlpValue *args, int argc, void *ud) {
 }
 
 static SlpValue val_beacon_command_register(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    (void)vm; (void)ud;
-    if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING)
-        printf("[+] Registered command: %s\n", SLP_AS_STRING(args[0])->chars);
+    (void)ud;
+    if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
+        const char *name = SLP_AS_STRING(args[0])->chars;
+        printf("[+] Registered command: %s\n", name);
+
+        int64_t addr = slp_vm_ffi_get_long(vm, 255);
+        AggressorState *state = (AggressorState *)(uintptr_t)addr;
+        if (state) {
+            const char *description = (argc >= 2 && SLP_IS_OBJ(args[1]) && SLP_OBJ_TYPE(args[1]) == SLP_OBJ_STRING) ? SLP_AS_STRING(args[1])->chars : "";
+            const char *help = (argc >= 3 && SLP_IS_OBJ(args[2]) && SLP_OBJ_TYPE(args[2]) == SLP_OBJ_STRING) ? SLP_AS_STRING(args[2])->chars : "";
+            aggressor_register_command(state, name, description, help);
+        }
+    }
     return SLP_NULL_VAL;
 }
 
@@ -176,23 +215,40 @@ static SlpValue val_beacon_inline_execute(SlpVM *vm, SlpValue *args, int argc, v
 }
 
 static SlpValue val_beacon_command_detail(SlpVM *vm, SlpValue *args, int argc, void *ud) {
-    (void)args; (void)argc; (void)ud;
+    (void)ud;
+    if (argc >= 1 && SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING) {
+        const char *name = SLP_AS_STRING(args[0])->chars;
+        int64_t addr = slp_vm_ffi_get_long(vm, 255);
+        AggressorState *state = (AggressorState *)(uintptr_t)addr;
+        if (state) {
+            const char *help = aggressor_get_command_help(state, name);
+            if (help) {
+                return SLP_OBJ_VAL(slp_vm_copy_string(vm, help, strlen(help)));
+            }
+        }
+    }
     return SLP_OBJ_VAL(slp_vm_copy_string(vm, "Mock details", 12));
 }
 
 static SlpValue val_openf(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     REPLState *state = (REPLState *)ud;
     (void)vm;
-    if (argc < 1 || !(SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING))
+    if (argc < 1 || !(SLP_IS_OBJ(args[0]) && SLP_OBJ_TYPE(args[0]) == SLP_OBJ_STRING)) {
+        printf("[Debug] val_openf: Invalid arguments\n");
         return SLP_NUM_VAL(-1);
+    }
     const char *path = SLP_AS_STRING(args[0])->chars;
+    printf("[Debug] val_openf: Attempting to open path: '%s'\n", path);
 
     for (int i = 0; i < MAX_OPEN_FILES; i++) {
         if (!state->open_files[i]) {
             FILE *f = fopen(path, "rb");
             if (f) {
+                printf("[Debug] val_openf: Successfully opened '%s' as handle %d\n", path, i);
                 state->open_files[i] = f;
                 return SLP_NUM_VAL(i);
+            } else {
+                perror("[Debug] val_openf fopen failed");
             }
             break;
         }
@@ -283,9 +339,19 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    const char *script_file = argv[1];
-
     memset(&global_repl_state, 0, sizeof(global_repl_state));
+
+    const char *script_file = argv[1];
+    const char *last_slash = strrchr(script_file, '/');
+    if (last_slash) {
+        size_t dir_len = last_slash - script_file + 1;
+        if (dir_len < sizeof(global_repl_state.script_dir)) {
+            memcpy(global_repl_state.script_dir, script_file, dir_len);
+            global_repl_state.script_dir[dir_len] = '\0';
+        }
+    } else {
+        global_repl_state.script_dir[0] = '\0';
+    }
 
     /* Create VM */
     SlpVM *vm = slp_vm_new(&allocator);
@@ -303,6 +369,9 @@ int main(int argc, char **argv) {
     slp_vm_register_native(vm, "println", val_println);
 
     aggressor_set(ag_state, "barch",                    val_barch);
+    aggressor_set(ag_state, "beacon_info",              val_beacon_info);
+    aggressor_set(ag_state, "deleteFile",               val_deleteFile);
+    aggressor_set(ag_state, "readAll",                  val_readAll);
     aggressor_set(ag_state, "script_resource",          val_script_resource);
     aggressor_set(ag_state, "bof_pack",                 val_bof_pack);
     aggressor_set(ag_state, "btask",                    val_btask);
@@ -324,7 +393,7 @@ int main(int argc, char **argv) {
     FILE *f = fopen(script_file, "rb");
     if (!f) {
         fprintf(stderr, "Could not open file: %s\n", script_file);
-        free(ag_state);
+        aggressor_deinit(ag_state);
         slp_vm_free(vm);
         return 1;
     }
@@ -340,7 +409,7 @@ int main(int argc, char **argv) {
     free(source);
     if (r != SLP_OK) {
         fprintf(stderr, "[!] Failed evaluating script: %s\n", script_file);
-        free(ag_state);
+        aggressor_deinit(ag_state);
         slp_vm_free(vm);
         return 1;
     }
@@ -377,7 +446,17 @@ int main(int argc, char **argv) {
                 if (strcmp(alias_registry[i].name, cmd) == 0) {
                     found = 1;
                     char eval_buf[4096];
-                    snprintf(eval_buf, sizeof(eval_buf), "__alias_%s('1', '%s');", cmd, args_str);
+                    int len = snprintf(eval_buf, sizeof(eval_buf), "__alias_%s('1'", cmd);
+                    char *args_copy = strdup(args_str);
+                    char *token = strtok(args_copy, " \t\r\n");
+                    while (token) {
+                        int written = snprintf(eval_buf + len, sizeof(eval_buf) - len, ", '%s'", token);
+                        if (written > 0) len += written;
+                        token = strtok(NULL, " \t\r\n");
+                    }
+                    free(args_copy);
+                    snprintf(eval_buf + len, sizeof(eval_buf) - len, ");");
+                    
                     vm->repl_mode = true;
                     slp_vm_interpret(vm, eval_buf);
                     vm->repl_mode = false;
@@ -390,7 +469,7 @@ int main(int argc, char **argv) {
         free(line);
     }
 
-    free(ag_state);
+    aggressor_deinit(ag_state);
     slp_vm_free(vm);
     return 0;
 }

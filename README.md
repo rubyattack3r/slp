@@ -1,16 +1,15 @@
-# SLP C Implementation
+# Sleep C Implementation
 
-This project is a C implementation of a parser, lexer, and eventually a VM for the `slp` programming language.
+This project is a C implementation of a parser, lexer, and eventually a VM for the `sleep` programming language.
 
 ## Design Constraints
 
 1. **Zero Dependencies**: The core C implementation has absolutely zero external dependencies. It does not even rely on standard `malloc` and `free` implicitly. 
 2. **Allocator Approach**: All memory allocations are driven through a custom `SlpAllocator` which involves a `userdata` pointer and a user-provided reallocation function. This allocator must be passed around everywhere.
-3. **Architecture Reference**: The implementation structure takes inspiration from the [Wren](https://github.com/wren-lang/wren) C implementation, while the language semantics and lexer/parser logic are based on the [SLP](https://github.com/sleepy-lang/sleepy) reference implementation.
 
 ## Project Structure
 
-- `include/`: Public headers for incorporating the SLP C API into your applications.
+- `include/`: Public headers for incorporating the Sleep C API into your applications.
 - `src/`: Core implementation files for the Lexer, Parser, and VM.
 - `tests/`: Unit tests written in C++ using `doctest.h` to verify the C implementation against the standard test fixtures from the reference implementation.
 
@@ -119,15 +118,16 @@ Once loaded, type any registered alias with arguments (e.g., `sc_config arg1 arg
 
 ### 4. Generic Extension Library (`libaggressor`)
 
-Located in `extensions/aggressor/`, `libaggressor` decouples the core SLP C engine from Cobalt Strike domain logic. It supports multi-VM co-existence by storing all FFI hooks, overrides, and dispatch state inside a heap-allocated struct associated with each VM instance via FFI slots, completely avoiding single-VM static globals.
+Located in `extensions/aggressor/`, `libaggressor` decouples the core Sleep C engine from Cobalt Strike domain logic. It supports multi-VM co-existence by storing all FFI hooks, overrides, and dispatch state inside a heap-allocated struct associated with each VM instance via FFI slots, completely avoiding single-VM static globals.
 
 ---
 
 ## CI/CD Pipeline Integration
 
-The bundled bash script `bundle.sh` automates the build and bundling workflow:
+The project uses `make` and `bin/cna_bundler` directly to build and bundle projects:
 ```bash
-./bundle.sh ./examples/cna-projects ./dist/packaged_tools.cna
+make tools
+./bin/cna_bundler ./examples/cna-projects -o ./dist/packaged_tools.cna
 ```
 
 Two complete GitHub Actions workflows are located under `.github/workflows/`:
