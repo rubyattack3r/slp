@@ -18,7 +18,7 @@ STDLIB_OBJ = extensions/stdlib/stdlib.o
 TEST_SRC = $(wildcard tests/*.cpp)
 TEST_OBJ = $(TEST_SRC:.cpp=.o)
 
-.PHONY: all clean test bench amalgamate slp cna_bundler cna_validator aggressor tools slp_lib libaggressor test_runner bench_slp slp_fmt slpd
+.PHONY: all clean test bench amalgamate slp cna_bundler cna_validator aggressor tools slp_lib libaggressor test_runner bench_slp slp_fmt slpd validate
 
 all: slp_lib libaggressor slp tools amalgamate
 
@@ -105,6 +105,11 @@ bin/slpd: $(OBJ) tools/slpd.c
 	$(CC) $(CFLAGS) -o $@ tools/slpd.c $(OBJ)
 
 tools: cna_bundler cna_validator aggressor slp_fmt slpd bench_slp
+
+validate: tools
+	@mkdir -p dist
+	./bin/cna_bundler ./third_party -o ./dist/packaged_tools.cna
+	./bin/cna_validator ./dist/packaged_tools.cna
 
 clean:
 	rm -rf src/*.o tests/*.o extensions/**/*.o extensions/*.o deps/**/*.o
