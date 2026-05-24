@@ -9,6 +9,7 @@
 #include "slp_disasm.h"
 #include "slp_parser.h"
 #include "slp_ast.h"
+#include "utils.h"
 
 static void *std_alloc(void *ptr, size_t size, void *ud) {
     (void)ud;
@@ -17,29 +18,6 @@ static void *std_alloc(void *ptr, size_t size, void *ud) {
 }
 
 static SlpAllocator allocator = {std_alloc, NULL};
-
-static char *read_file(const char *path) {
-    FILE *file = fopen(path, "rb");
-    if (!file) {
-        fprintf(stderr, "Error: Could not open input file '%s'\n", path);
-        return NULL;
-    }
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    char *buffer = (char *)malloc(size + 1);
-    if (!buffer) {
-        fclose(file);
-        fprintf(stderr, "Error: Memory allocation failed for file buffer\n");
-        return NULL;
-    }
-
-    size_t read_bytes = fread(buffer, 1, size, file);
-    buffer[read_bytes] = '\0';
-    fclose(file);
-    return buffer;
-}
 
 static void print_usage(const char *prog) {
     fprintf(stderr, "Usage: %s <input_file>\n", prog);
@@ -66,8 +44,9 @@ int main(int argc, char **argv) {
     }
 
     const char *input_path = argv[1];
-    char *source = read_file(input_path);
+    char *source = utils_read_file(input_path, NULL);
     if (!source) {
+        fprintf(stderr, "Error: Could not read input file '%s'\n", input_path);
         return 1;
     }
 

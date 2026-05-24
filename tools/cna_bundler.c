@@ -28,6 +28,7 @@ static void* default_realloc(void* ptr, size_t new_size, void* user_data) {
     return realloc(ptr, new_size);
 }
 
+#include "utils.h"
 #include <dirent.h>
 #include <sys/stat.h>
 
@@ -640,55 +641,7 @@ static void rewrite_pass(SlpASTNode* node, SymbolTable* symbols, const char* pre
     }
 }
 
-static char* read_file(const char* path) {
-    FILE* file = fopen(path, "rb");
-    if (file == NULL) {
-        fprintf(stderr, "Could not open file \"%s\".\n", path);
-        return NULL;
-    }
 
-    fseek(file, 0L, SEEK_END);
-    size_t fileSize = ftell(file);
-    rewind(file);
-
-    char* buffer = (char*)malloc(fileSize + 1);
-    if (buffer == NULL) {
-        fprintf(stderr, "Not enough memory to read \"%s\".\n", path);
-        fclose(file);
-        return NULL;
-    }
-
-    size_t bytesRead = fread(buffer, sizeof(char), fileSize, file);
-    if (bytesRead < fileSize) {
-        fprintf(stderr, "Could not read file \"%s\".\n", path);
-        free(buffer);
-        fclose(file);
-        return NULL;
-    }
-
-    buffer[bytesRead] = '\0';
-    fclose(file);
-    return buffer;
-}
-
-static char* get_directory_part(const char* path, SlpAllocator* allocator) {
-    const char* last_slash = strrchr(path, '/');
-    if (!last_slash) {
-        char* dir = allocator->reallocate(NULL, 2, allocator->user_data);
-        strcpy(dir, ".");
-        return dir;
-    }
-    size_t len = last_slash - path;
-    if (len == 0) {
-        char* dir = allocator->reallocate(NULL, 2, allocator->user_data);
-        strcpy(dir, "/");
-        return dir;
-    }
-    char* dir = allocator->reallocate(NULL, len + 1, allocator->user_data);
-    strncpy(dir, path, len);
-    dir[len] = '\0';
-    return dir;
-}
 
 static void rewrite_script_resources(SlpASTNode* node, const char* file_dir, SlpAllocator* allocator) {
     if (!node) return;
@@ -754,7 +707,7 @@ static SlpASTNode* process_file(const char* filepath, const char* prefix, const 
     
     add_string_to_list(&symbols->loaded_paths, &symbols->loaded_paths_count, path_to_track, allocator);
 
-    char* source = read_file(filepath);
+    char* source = utils_read_file(filepath, NULL);
     if (!source) return NULL;
 
     SlpParser parser;
@@ -774,7 +727,7 @@ static SlpASTNode* process_file(const char* filepath, const char* prefix, const 
     }
     
     if (root) {
-        char* current_dir = get_directory_part(filepath, allocator);
+        char* current_dir = utils_get_directory(filepath);
         
         inline_includes(root, symbols, prefix, current_dir, project_name, depth);
         
@@ -788,7 +741,7 @@ static SlpASTNode* process_file(const char* filepath, const char* prefix, const 
             rewrite_pass(root, symbols, prefix, project_dir, project_name, &active_locals, &active_locals_count);
         }
         
-        allocator->reallocate(current_dir, 0, allocator->user_data);
+        free(current_dir);
     }
     
     return root;
@@ -914,6 +867,8 @@ int main(int argc, char* argv[]) {
             // Processing a single file instead of directory
             char* project_dir = strdup(target_dir);
             char* last_slash = strrchr(project_dir, '/');
+            char* last_backslash = strrchr(project_dir, '\\');
+            if (last_backslash > last_slash) last_slash = last_backslash;
             if (last_slash) *last_slash = '\0'; else strcpy(project_dir, ".");
             
             SlpASTNode* root = process_file(target_dir, "Proj_", project_dir, "Proj", &symbols, 0, &allocator);

@@ -14,6 +14,7 @@
 #include "slp_parser.h"
 #include "aggressor.h"
 #include "slp_stdlib.h"
+#include "utils.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -438,8 +439,8 @@ int main(int argc, char **argv) {
 
     /* Load and validate the script */
     printf("[*] Loading and validating %s...\n", script_file);
-    FILE *f = fopen(script_file, "rb");
-    if (!f) {
+    char *source = utils_read_file(script_file, NULL);
+    if (!source) {
         char msg[512];
         snprintf(msg, sizeof(msg), "Could not open file: %s", script_file);
         add_validation_error(&state, "file_open_failed", script_file, msg);
@@ -448,13 +449,6 @@ int main(int argc, char **argv) {
         slp_vm_free(vm);
         return 1;
     }
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char *source = (char *)malloc(fsize + 1);
-    size_t read_cnt = fread(source, 1, fsize, f);
-    source[read_cnt] = '\0';
-    fclose(f);
 
     SlpResult r = slp_vm_interpret(vm, source);
     free(source);

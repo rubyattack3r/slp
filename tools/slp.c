@@ -6,6 +6,7 @@
 #include "slp_parser.h"
 #include "slp_stdlib.h"
 #include "bestline.h"
+#include "utils.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -162,18 +163,11 @@ int main(int argc, char **argv) {
     slp_vm_set_write_fn(vm, repl_write, NULL);
 
     if (argc > 1) {
-        FILE *f = fopen(argv[1], "rb");
-        if (!f) {
+        char *source = utils_read_file(argv[1], NULL);
+        if (!source) {
             fprintf(stderr, "Could not open file: %s\n", argv[1]);
             return 1;
         }
-        fseek(f, 0, SEEK_END);
-        long fsize = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        char *source = (char *)malloc(fsize + 1);
-        fread(source, 1, fsize, f);
-        source[fsize] = '\0';
-        fclose(f);
 
         SlpResult r = slp_vm_interpret(vm, source);
         free(source);

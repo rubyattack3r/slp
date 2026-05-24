@@ -15,6 +15,7 @@
 #include "slp_stdlib.h"
 #include "bestline.h"
 #include "bof.h"
+#include "utils.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -800,13 +801,11 @@ int main(int argc, char **argv) {
             global_repl_state.verbosity = 2;
         }
     }
-    const char *last_slash = strrchr(script_file, '/');
-    if (last_slash) {
-        size_t dir_len = last_slash - script_file + 1;
-        if (dir_len < sizeof(global_repl_state.script_dir)) {
-            memcpy(global_repl_state.script_dir, script_file, dir_len);
-            global_repl_state.script_dir[dir_len] = '\0';
-        }
+    char *dir = utils_get_directory(script_file);
+    if (dir) {
+        strncpy(global_repl_state.script_dir, dir, sizeof(global_repl_state.script_dir) - 1);
+        global_repl_state.script_dir[sizeof(global_repl_state.script_dir) - 1] = '\0';
+        free(dir);
     } else {
         global_repl_state.script_dir[0] = '\0';
     }
@@ -857,20 +856,13 @@ int main(int argc, char **argv) {
 
     /* Load the script */
     printf("[*] Loading script: %s...\n", script_file);
-    FILE *f = fopen(script_file, "rb");
-    if (!f) {
+    char *source = utils_read_file(script_file, NULL);
+    if (!source) {
         fprintf(stderr, "Could not open file: %s\n", script_file);
         aggressor_deinit(ag_state);
         slp_vm_free(vm);
         return 1;
     }
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char *source = (char *)malloc(fsize + 1);
-    size_t read_cnt = fread(source, 1, fsize, f);
-    source[read_cnt] = '\0';
-    fclose(f);
 
     SlpResult r = slp_vm_interpret(vm, source);
     free(source);
