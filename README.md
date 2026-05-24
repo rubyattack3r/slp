@@ -145,7 +145,7 @@ The `bench_slp` runs standard performance tests on the SlpVM core.
 The project uses `make` and `bin/cna_bundler` directly to build and bundle projects:
 ```bash
 make tools
-./bin/cna_bundler ./examples/cna-projects -o ./dist/packaged_tools.cna
+./bin/cna_bundler ./third_party -o ./dist/packaged_tools.cna
 ```
 
 Two complete GitHub Actions workflows are located under `.github/workflows/`:

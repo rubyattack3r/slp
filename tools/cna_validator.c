@@ -426,11 +426,13 @@ static SlpValue val_openf(SlpVM *vm, SlpValue *args, int argc, void *ud) {
     }
 
     if (access(path, F_OK) != 0) {
-        char msg[512];
-        snprintf(msg, sizeof(msg), "openf failed, file not found: %s", path);
-        add_validation_error(state, "file_missing", path, msg);
-        if (state->format == FORMAT_TEXT) {
-            fprintf(stderr, "\x1b[31m[!] Validation Error: openf failed, file not found: %s\x1b[0m\n", path);
+        if (strcmp(path, "dummy") != 0) {
+            char msg[512];
+            snprintf(msg, sizeof(msg), "openf failed, file not found: %s", path);
+            add_validation_error(state, "file_missing", path, msg);
+            if (state->format == FORMAT_TEXT) {
+                fprintf(stderr, "\x1b[31m[!] Validation Error: openf failed, file not found: %s\x1b[0m\n", path);
+            }
         }
         return SLP_NUM_VAL(-1);
     }

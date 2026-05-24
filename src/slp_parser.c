@@ -178,6 +178,7 @@ static SlpASTNode *unary(SlpParser *parser, SlpASTNode *left,
   SlpASTNode *node = allocate_node(parser, SLP_AST_UNARYOP);
   node->as.unaryop.op = operatorToken;
   node->as.unaryop.operand = operand;
+  node->as.unaryop.is_postfix = false;
   return node;
 }
 
@@ -543,6 +544,7 @@ static SlpASTNode *postfix(SlpParser *parser, SlpASTNode *left,
   SlpASTNode *node = allocate_node(parser, SLP_AST_UNARYOP);
   node->as.unaryop.op = parser->previous;
   node->as.unaryop.operand = left;
+  node->as.unaryop.is_postfix = true;
   return node;
 }
 

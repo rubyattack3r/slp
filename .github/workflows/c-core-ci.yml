@@ -34,6 +34,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Verify clean build
         run: |
@@ -47,3 +49,28 @@ jobs:
       - name: Run performance benchmarks
         run: |
           make bench
+
+      - name: Verify CNA Code Formatting / Linting
+        run: |
+          # Format check a production script to verify formatting & parsing
+          ./bin/slp_fmt third_party/Kerbeus-BOF/kerbeus_cs.cna
+
+      - name: Run CNA Bundler (Consolidation)
+        run: |
+          mkdir -p dist
+          ./bin/cna_bundler ./third_party -o ./dist/packaged_tools.cna
+
+      - name: Run CNA Dry-Run Validator (Simulations)
+        run: |
+          ./bin/cna_validator ./dist/packaged_tools.cna --format text
+          ./bin/cna_validator ./dist/packaged_tools.cna --format json > dist/validation_report.json
+          ./bin/cna_validator ./dist/packaged_tools.cna --format junit > dist/validation_report.xml
+
+      - name: Archive and Package Consolidated CNA Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-cna-bundle-${{ matrix.os }}
+          path: |
+            dist/packaged_tools.cna
+            dist/validation_report.json
+            dist/validation_report.xml

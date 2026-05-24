@@ -323,20 +323,40 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
         break;
     }
     case SLP_AST_UNARYOP: {
-        compile_expr(compiler, node->as.unaryop.operand);
-        switch (node->as.unaryop.op.type) {
-        case SLP_TOKEN_MINUS: emit_byte(compiler, OP_NEGATE, line); break;
-        case SLP_TOKEN_BANG:  emit_byte(compiler, OP_NOT, line); break;
-        case SLP_TOKEN_INC:   emit_byte(compiler, OP_INCREMENT, line); break;
-        case SLP_TOKEN_DEC:   emit_byte(compiler, OP_DECREMENT, line); break;
-        case SLP_TOKEN_UNARY_PREDICATE_BRIDGE: {
-            SlpObjString *pred_name = intern_str(compiler,
-                node->as.unaryop.op.start, (uint32_t)node->as.unaryop.op.length);
-            emit_byte(compiler, OP_UNARY_PREDICATE, line);
-            emit_short(compiler, make_constant(compiler, SLP_OBJ_VAL(pred_name)), line);
-            break;
-        }
-        default: break;
+        SlpToken op = node->as.unaryop.op;
+        SlpASTNode *operand = node->as.unaryop.operand;
+        if (op.type == SLP_TOKEN_INC || op.type == SLP_TOKEN_DEC) {
+            if (operand && operand->as.string_val) {
+                const char *var_name = operand->as.string_val;
+                uint32_t slen = (uint32_t)slp_utils_strlen(var_name);
+                named_variable(compiler, var_name, slen, false, line);
+                if (node->as.unaryop.is_postfix) {
+                    emit_byte(compiler, OP_DUP, line);
+                    emit_byte(compiler, op.type == SLP_TOKEN_INC ? OP_INCREMENT : OP_DECREMENT, line);
+                    named_variable(compiler, var_name, slen, true, line);
+                    emit_byte(compiler, OP_POP, line);
+                } else {
+                    emit_byte(compiler, op.type == SLP_TOKEN_INC ? OP_INCREMENT : OP_DECREMENT, line);
+                    named_variable(compiler, var_name, slen, true, line);
+                }
+            } else {
+                compile_expr(compiler, operand);
+                emit_byte(compiler, op.type == SLP_TOKEN_INC ? OP_INCREMENT : OP_DECREMENT, line);
+            }
+        } else {
+            compile_expr(compiler, operand);
+            switch (op.type) {
+            case SLP_TOKEN_MINUS: emit_byte(compiler, OP_NEGATE, line); break;
+            case SLP_TOKEN_BANG:  emit_byte(compiler, OP_NOT, line); break;
+            case SLP_TOKEN_UNARY_PREDICATE_BRIDGE: {
+                SlpObjString *pred_name = intern_str(compiler,
+                    op.start, (uint32_t)op.length);
+                emit_byte(compiler, OP_UNARY_PREDICATE, line);
+                emit_short(compiler, make_constant(compiler, SLP_OBJ_VAL(pred_name)), line);
+                break;
+            }
+            default: break;
+            }
         }
         break;
     }

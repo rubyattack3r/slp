@@ -89,6 +89,7 @@ struct SlpASTNode {
     struct {
       SlpToken op;
       struct SlpASTNode *operand;
+      bool is_postfix;
     } unaryop;
 
     // List of statements (Block, Script, LvalueTuple)
