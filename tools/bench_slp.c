@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "slp_common.h"
 #include "slp_core.h"
 #include "slp_vm.h"
