@@ -1,6 +1,6 @@
 # Sleep C Implementation
 
-This project is a complete, native C implementation of a parser, lexer, and stack-based VM for the `sleep` programming language.
+This project is a complete, native C implementation of a parser, lexer, and stack-based VM for the [`sleep` programming language](https://sleep.dashnine.org/).
 
 ## Design Constraints
 
@@ -182,7 +182,7 @@ make tools
 
 Two complete GitHub Actions workflows are located under `.github/workflows/`:
 1. **C Core CI (`c-core-ci.yml`)**: Automates building all targets, running the full C++ unit test suite, and executing performance benchmarks natively on both **Ubuntu** and **macOS** runners.
-2. **Create Release Suite (`release.yml`)**: Provisions the development environment using **Nix**, compiles native production binaries for Linux and macOS Universal, cross-compiles Windows binaries via MinGW, packages them into structured platform archives, and drafts a GitHub Release with the compiled assets.
+2. **Rolling Build (`rolling.yml`)**: Provisions the development environment using **Nix**, compiles native production binaries for Linux and macOS Universal, cross-compiles Windows binaries via MinGW, packages them into structured platform archives, and continuously updates a `rolling` GitHub Release containing the bleeding-edge compiled assets on every push to the `master` branch.
 
 ---
 
@@ -201,4 +201,109 @@ To build and run the performance benchmarks:
 ```bash
 make bench
 ```
+
+## Embedding the Library
+
+The `sleepy` VM is designed to be easily embedded directly into your own C/C++ applications. It requires you to define a custom allocator for zero-dependency memory management. 
+
+### Basic Embedding
+
+Here is a minimal example demonstrating how to initialize the VM, load the standard library, and evaluate a script:
+
+```c
+#include <stdlib.h>
+#include "slp_common.h"
+#include "slp_vm.h"
+#include "slp_stdlib.h"
+
+// 1. Define a basic reallocation-based allocator
+static void *my_alloc(void *ptr, size_t size, void *ud) {
+    if (size == 0) { free(ptr); return NULL; }
+    return realloc(ptr, size);
+}
+
+int main() {
+    SlpAllocator allocator = {my_alloc, NULL};
+
+    // 2. Create a VM instance
+    SlpVM *vm = slp_vm_new(&allocator);
+    
+    // 3. Load standard library functions (println, etc.)
+    slp_stdlib_init(vm);
+    
+    // 4. Evaluate your Sleep script
+    const char *source = "println(\"Hello from Embedded Sleep!\");";
+    SlpResult res = slp_vm_interpret(vm, source);
+    
+    // 5. Clean up
+    slp_vm_free(vm);
+    return res == SLP_OK ? 0 : 1;
+}
+```
+
+### Embedding with `libaggressor`
+
+If you are evaluating Cobalt Strike Aggressor Scripts (`.cna`), you must also initialize `libaggressor`. This library dynamically registers all native Aggressor API hooks into the VM and provides a routing framework (via fallbacks and explicit C overrides) so your application can define how commands like `bexecute_assembly` or `blog` actually behave in your specific environment.
+
+```c
+#include <stdlib.h>
+#include "slp_common.h"
+#include "slp_vm.h"
+#include "aggressor.h"
+
+static void *my_alloc(void *ptr, size_t size, void *ud) {
+    if (size == 0) { free(ptr); return NULL; }
+    return realloc(ptr, size);
+}
+
+// Custom override for an existing Aggressor function (e.g., 'blog')
+static SlpValue my_blog_override(SlpVM *vm, SlpValue *args, int argc, void *user_data) {
+    if (argc >= 2 && SLP_IS_STRING(args[1])) {
+        printf("[C2 Log]: %s\n", SLP_AS_STRING(args[1])->chars);
+    }
+    return SLP_NULL_VAL;
+}
+
+// A completely custom native function not present in standard Aggressor
+static SlpValue my_custom_api(SlpVM *vm, SlpValue *args, int argc) {
+    printf("[Custom API]: Executed!\n");
+    return SLP_BOOL_VAL(true);
+}
+
+int main() {
+    SlpAllocator allocator = {my_alloc, NULL};
+    SlpVM *vm = slp_vm_new(&allocator);
+    
+    // Initialize libaggressor with an optional context/fallback configuration
+    AggressorConfig config = {
+        .fallback = NULL,       // Use the safe default no-op fallback for unknown functions
+        .user_data = NULL       // Optional context pointer passed into all overrides
+    };
+    AggressorState *ag_state = aggressor_init(vm, &config);
+
+    // 1. Override specific native Aggressor functions
+    aggressor_set(ag_state, "blog", my_blog_override);
+
+    // 2. Define your own entirely custom functions
+    slp_vm_define_native(vm, "my_custom_api", my_custom_api);
+
+    // Evaluate the Aggressor script
+    const char *script = 
+        "blog(\"123\", \"This is intercepted by my_blog_override in C!\");"
+        "my_custom_api();";
+        
+    slp_vm_interpret(vm, script);
+
+    // Clean up
+    aggressor_deinit(ag_state);
+    slp_vm_free(vm);
+    return 0;
+}
+```
+
+To link against the library, compile your application with the static libraries (`libslp.a` and `libaggressor.a`) located in the `bin/` directory and ensure the `include/` directory is in your header search paths.
+
+## Alternatives
+
+For another implementation of the Sleep programming language, please see [EvanMcBroom/sleepy](https://github.com/EvanMcBroom/sleepy).
 

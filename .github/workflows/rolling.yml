@@ -1,9 +1,10 @@
-name: Create Release Suite
+name: Rolling Build
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - master
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,39 +25,41 @@ jobs:
         run: |
           make clean
           make all
-          
+
           # Package Linux
           mkdir -p slp-linux-amd64/bin slp-linux-amd64/lib slp-linux-amd64/include slp-linux-amd64/src
           cp bin/slp bin/aggressor bin/cna_bundler bin/cna_validator bin/slp_fmt bin/slpd bin/bench_slp slp-linux-amd64/bin/
           cp bin/libslp.a bin/libaggressor.a slp-linux-amd64/lib/
           cp dist/slp.h extensions/aggressor/aggressor.h slp-linux-amd64/include/
           cp dist/slp.c slp-linux-amd64/src/
-          tar -czf slp-${{ github.ref_name }}-linux-amd64.tar.gz slp-linux-amd64/
+          tar -czf slp-rolling-linux-amd64.tar.gz slp-linux-amd64/
 
       - name: Build Windows targets (Nix MinGW Cross-Compile)
         run: |
           nix develop -c make clean
           nix develop -c make all CC=x86_64-w64-mingw32-gcc
-          
+
           # Package Windows
           mkdir -p slp-windows-amd64/bin slp-windows-amd64/lib slp-windows-amd64/include slp-windows-amd64/src
           cp bin/slp.exe bin/aggressor.exe bin/cna_bundler.exe bin/cna_validator.exe bin/slp_fmt.exe bin/slpd.exe bin/bench_slp.exe slp-windows-amd64/bin/
           cp bin/libslp.a bin/libaggressor.a slp-windows-amd64/lib/
           cp dist/slp.h extensions/aggressor/aggressor.h slp-windows-amd64/include/
           cp dist/slp.c slp-windows-amd64/src/
-          zip -r slp-${{ github.ref_name }}-windows-amd64.zip slp-windows-amd64/
+          zip -r slp-rolling-windows-amd64.zip slp-windows-amd64/
 
       - name: Upload Linux archive
         uses: actions/upload-artifact@v4
         with:
           name: linux-amd64
-          path: slp-${{ github.ref_name }}-linux-amd64.tar.gz
+          path: slp-rolling-linux-amd64.tar.gz
+          retention-days: 1
 
       - name: Upload Windows archive
         uses: actions/upload-artifact@v4
         with:
           name: windows-amd64
-          path: slp-${{ github.ref_name }}-windows-amd64.zip
+          path: slp-rolling-windows-amd64.zip
+          retention-days: 1
 
   build-macos:
     runs-on: macos-latest
@@ -68,20 +71,21 @@ jobs:
         run: |
           make clean
           make all CC="clang -arch arm64 -arch x86_64" CXX="clang++ -arch arm64 -arch x86_64"
-          
+
           # Package macOS
           mkdir -p slp-macos-universal/bin slp-macos-universal/lib slp-macos-universal/include slp-macos-universal/src
           cp bin/slp bin/aggressor bin/cna_bundler bin/cna_validator bin/slp_fmt bin/slpd bin/bench_slp slp-macos-universal/bin/
           cp bin/libslp.a bin/libaggressor.a slp-macos-universal/lib/
           cp dist/slp.h extensions/aggressor/aggressor.h slp-macos-universal/include/
           cp dist/slp.c slp-macos-universal/src/
-          tar -czf slp-${{ github.ref_name }}-macos-universal.tar.gz slp-macos-universal/
+          tar -czf slp-rolling-macos-universal.tar.gz slp-macos-universal/
 
       - name: Upload macOS archive
         uses: actions/upload-artifact@v4
         with:
           name: macos-universal
-          path: slp-${{ github.ref_name }}-macos-universal.tar.gz
+          path: slp-rolling-macos-universal.tar.gz
+          retention-days: 1
 
   publish-release:
     runs-on: ubuntu-latest
@@ -105,13 +109,16 @@ jobs:
         with:
           name: macos-universal
 
-      - name: Create draft release and upload assets
+      - name: Update Rolling Release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          tag_name: rolling
+          name: Rolling Build
+          prerelease: true
+          draft: false
           files: |
-            slp-${{ github.ref_name }}-linux-amd64.tar.gz
-            slp-${{ github.ref_name }}-windows-amd64.zip
-            slp-${{ github.ref_name }}-macos-universal.tar.gz
+            slp-rolling-linux-amd64.tar.gz
+            slp-rolling-windows-amd64.zip
+            slp-rolling-macos-universal.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,6 +1,6 @@
 [submodule "third_party/C2-Tool-Collection"]
 	path = third_party/C2-Tool-Collection
-	url = https://github.com/InfinityCurveLabs/C2-Tool-Collection
+	url = https://github.com/outflanknl/C2-Tool-Collection
 [submodule "third_party/CS-Remote-OPs-BOF"]
 	path = third_party/CS-Remote-OPs-BOF
 	url = https://github.com/trustedsec/CS-Remote-OPs-BOF
@@ -9,19 +9,19 @@
 	url = https://github.com/trustedsec/CS-Situational-Awareness-BOF
 [submodule "third_party/Kerbeus-BOF"]
 	path = third_party/Kerbeus-BOF
-	url = https://github.com/InfinityCurveLabs/Kerbeus-BOF
+	url = https://github.com/RalfHacker/Kerbeus-BOF
 [submodule "third_party/No-Consolation"]
 	path = third_party/No-Consolation
-	url = https://github.com/InfinityCurveLabs/No-Consolation
+	url = https://github.com/Fortra/No-Consolation
 [submodule "third_party/UAC-BOF-Bonanza"]
 	path = third_party/UAC-BOF-Bonanza
-	url = https://github.com/InfinityCurveLabs/UAC-BOF-Bonanza
+	url = https://github.com/icyguider/UAC-BOF-Bonanza
 [submodule "third_party/aad_prt_bof"]
 	path = third_party/aad_prt_bof
-	url = https://github.com/InfinityCurveLabs/aad_prt_bof
+	url = https://github.com/wotwot563/aad_prt_bof
 [submodule "third_party/cmstplua-uac-bypass"]
 	path = third_party/cmstplua-uac-bypass
-	url = https://github.com/InfinityCurveLabs/cmstplua-uac-bypass
+	url = https://github.com/tijme/cmstplua-uac-bypass
 [submodule "third_party/nanodump"]
 	path = third_party/nanodump
-	url = https://github.com/InfinityCurveLabs/nanodump
+	url = https://github.com/fortra/nanodump
