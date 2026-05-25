@@ -47,10 +47,10 @@ TEST_CASE("libaggressor: init and free") {
         .fallback = test_fallback,
         .user_data = nullptr,
     };
-    AggressorState *state = aggressor_init(vm, &cfg);
+    AggressorState *state = aggressor_new(vm, &cfg);
     REQUIRE(state != nullptr);
 
-    aggressor_deinit(state);
+    aggressor_free(state);
     slp_vm_free(vm);
 }
 
@@ -65,7 +65,7 @@ TEST_CASE("libaggressor: fallback and overrides") {
         .fallback = test_fallback,
         .user_data = nullptr,
     };
-    AggressorState *state = aggressor_init(vm, &cfg);
+    AggressorState *state = aggressor_new(vm, &cfg);
 
     /* Test fallback call */
     SlpResult r = slp_vm_interpret(vm, "bgetprivs();");
@@ -79,7 +79,7 @@ TEST_CASE("libaggressor: fallback and overrides") {
     CHECK(r == SLP_OK);
     CHECK(test_override_called == 1);
 
-    aggressor_deinit(state);
+    aggressor_free(state);
     slp_vm_free(vm);
 }
 
@@ -90,7 +90,7 @@ TEST_CASE("libaggressor: builtin pure utilities") {
         .fallback = nullptr,
         .user_data = nullptr,
     };
-    AggressorState *state = aggressor_init(vm, &cfg);
+    AggressorState *state = aggressor_new(vm, &cfg);
 
     /* Test iff */
     SlpResult r = slp_vm_interpret(vm, "assert iff(true, 1, 2) == 1; assert iff(false, 1, 2) == 2;");
@@ -128,7 +128,7 @@ TEST_CASE("libaggressor: builtin pure utilities") {
     r = slp_vm_interpret(vm, "assert rand(10) >= 0; assert tstamp() > 0;");
     CHECK(r == SLP_OK);
 
-    aggressor_deinit(state);
+    aggressor_free(state);
     slp_vm_free(vm);
 }
 
@@ -145,7 +145,7 @@ TEST_CASE("libaggressor: stateful beacon and dialog mocks") {
         .fallback = nullptr,
         .user_data = nullptr,
     };
-    AggressorState *state = aggressor_init(vm, &cfg);
+    AggressorState *state = aggressor_new(vm, &cfg);
 
     /* Test beacons() array and size */
     SlpResult r = slp_vm_interpret(vm, 
@@ -228,7 +228,7 @@ TEST_CASE("libaggressor: stateful beacon and dialog mocks") {
     r = slp_vm_interpret(vm, "assert $d['__buttons'][0]['action'] eq \"submit_action\";");
     CHECK(r == SLP_OK);
 
-    aggressor_deinit(state);
+    aggressor_free(state);
     slp_vm_free(vm);
 }
 
@@ -240,7 +240,7 @@ TEST_CASE("libaggressor: dynamic mock beacon configuration") {
         .fallback = nullptr,
         .user_data = nullptr,
     };
-    AggressorState *state = aggressor_init(vm, &cfg);
+    AggressorState *state = aggressor_new(vm, &cfg);
 
     /* 1. Update an existing property */
     SlpResult r = slp_vm_interpret(vm, 
@@ -276,6 +276,6 @@ TEST_CASE("libaggressor: dynamic mock beacon configuration") {
     );
     CHECK(r == SLP_OK);
 
-    aggressor_deinit(state);
+    aggressor_free(state);
     slp_vm_free(vm);
 }

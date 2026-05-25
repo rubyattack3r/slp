@@ -17,7 +17,7 @@ typedef struct coff_module {
     void *entrypoint;
 } coff_module_t;
 
-int coff_load(coff_module_t *module, 
+int coff_init(coff_module_t *module, 
               const uint8_t *data, size_t data_len, 
               const char *entrypoint_name,
               coff_symbol_resolver_t resolver,

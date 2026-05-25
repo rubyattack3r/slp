@@ -846,7 +846,7 @@ int main(int argc, char **argv) {
         .fallback  = repl_fallback,
         .user_data = &global_repl_state,
     };
-    AggressorState *ag_state = aggressor_init(vm, &cfg);
+    AggressorState *ag_state = aggressor_new(vm, &cfg);
 
     global_repl_state.mode = REPL_MODE_AGGRESSOR;
     global_repl_state.vm = vm;
@@ -887,7 +887,7 @@ int main(int argc, char **argv) {
     char *source = utils_read_file(script_file, NULL);
     if (!source) {
         fprintf(stderr, "Could not open file: %s\n", script_file);
-        aggressor_deinit(ag_state);
+        aggressor_free(ag_state);
         slp_vm_free(vm);
         return 1;
     }
@@ -896,7 +896,7 @@ int main(int argc, char **argv) {
     free(source);
     if (r != SLP_OK) {
         fprintf(stderr, "[!] Failed evaluating script: %s\n", script_file);
-        aggressor_deinit(ag_state);
+        aggressor_free(ag_state);
         slp_vm_free(vm);
         return 1;
     }
@@ -938,7 +938,7 @@ int main(int argc, char **argv) {
                     SlpResult res = slp_vm_interpret(vm, eval_buf);
                     vm->repl_mode = false;
                     
-                    aggressor_deinit(ag_state);
+                    aggressor_free(ag_state);
                     slp_vm_free(vm);
                     free(cmd_dup);
                     return (res == SLP_OK) ? 0 : 1;
@@ -947,7 +947,7 @@ int main(int argc, char **argv) {
             if (!found) {
                 printf("[-] Beacon command '%s' not registered as an alias.\n", cmd_dup);
                 free(cmd_dup);
-                aggressor_deinit(ag_state);
+                aggressor_free(ag_state);
                 slp_vm_free(vm);
                 return 1;
             }
@@ -962,7 +962,7 @@ int main(int argc, char **argv) {
                     printf("\n");
                 }
             }
-            aggressor_deinit(ag_state);
+            aggressor_free(ag_state);
             slp_vm_free(vm);
             return (res == SLP_OK) ? 0 : 1;
         }
@@ -1236,7 +1236,7 @@ int main(int argc, char **argv) {
     }
     if (buffer) free(buffer);
 
-    aggressor_deinit(ag_state);
+    aggressor_free(ag_state);
     slp_vm_free(vm);
     return 0;
 }

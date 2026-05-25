@@ -214,7 +214,7 @@ static void *bof_resolver(const char *name, void *userdata) {
 
 int bof_run(const uint8_t *bof_data, size_t bof_size, const char *entrypoint, const uint8_t *args, size_t args_size) {
     coff_module_t module;
-    int res = coff_load(&module, bof_data, bof_size, entrypoint, bof_resolver, NULL);
+    int res = coff_init(&module, bof_data, bof_size, entrypoint, bof_resolver, NULL);
     
     if (res != 0) {
         return res;

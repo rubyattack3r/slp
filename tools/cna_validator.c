@@ -410,9 +410,9 @@ int main(int argc, char **argv) {
         .fallback  = validator_fallback,
         .user_data = &state,
     };
-    AggressorState *ag_state = aggressor_init(vm, &cfg);
+    AggressorState *ag_state = aggressor_new(vm, &cfg);
 
-    /* Override println so it isn't reset by aggressor_init */
+    /* Override println so it isn't reset by aggressor_new */
     slp_vm_register_native(vm, "println", val_println);
 
     /* Override functions with validation-aware implementations */
@@ -445,7 +445,7 @@ int main(int argc, char **argv) {
         snprintf(msg, sizeof(msg), "Could not open file: %s", script_file);
         add_validation_error(&state, "file_open_failed", script_file, msg);
         fprintf(stderr, "Could not open file: %s\n", script_file);
-        aggressor_deinit(ag_state);
+        aggressor_free(ag_state);
         slp_vm_free(vm);
         return 1;
     }
@@ -455,7 +455,7 @@ int main(int argc, char **argv) {
     if (r != SLP_OK) {
         add_validation_error(&state, "global_load_failed", NULL, "Failed evaluating the script during initial load.");
         fprintf(stderr, "[!] Validation failed: error evaluating the script.\n");
-        aggressor_deinit(ag_state);
+        aggressor_free(ag_state);
         slp_vm_free(vm);
         return 1;
     }
@@ -487,7 +487,7 @@ int main(int argc, char **argv) {
         printf("[+] Validation SUCCESSFUL.\n");
     }
 
-    aggressor_deinit(ag_state);
+    aggressor_free(ag_state);
     slp_vm_free(vm);
     return state.validation_failed ? 1 : 0;
 }

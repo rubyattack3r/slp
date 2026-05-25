@@ -81,7 +81,7 @@ static size_t align_up(size_t val, size_t alignment) {
     return (val + alignment - 1) & ~(alignment - 1);
 }
 
-int coff_load(coff_module_t *module, const uint8_t *data, size_t data_len, const char *entrypoint_name, coff_symbol_resolver_t resolver, void *userdata) {
+int coff_init(coff_module_t *module, const uint8_t *data, size_t data_len, const char *entrypoint_name, coff_symbol_resolver_t resolver, void *userdata) {
     if (!module || !data || data_len < sizeof(COFF_FILE_HEADER)) return -1;
     
     memset(module, 0, sizeof(*module));

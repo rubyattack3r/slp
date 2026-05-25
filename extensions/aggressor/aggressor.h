@@ -17,7 +17,7 @@
  *       .fallback  = my_fallback,
  *       .user_data = &my_state,
  *   };
- *   aggressor_init(vm, &cfg);
+ *   aggressor_new(vm, &cfg);
  *   aggressor_set(vm, "openf", my_custom_openf);
  */
 
@@ -114,13 +114,13 @@ typedef struct {
  *
  * Call this ONCE after slp_vm_new().
  */
-AggressorState *aggressor_init(SlpVM *vm, AggressorConfig *config);
+AggressorState *aggressor_new(SlpVM *vm, AggressorConfig *config);
 
 /*
  * Deinitialize the Aggressor extension. Fully reclaims the state along with
  * all dynamically registered commands and metadata to prevent memory leaks.
  */
-void aggressor_deinit(AggressorState *state);
+void aggressor_free(AggressorState *state);
 
 /*
  * Override a single function after init. The provided function will be
@@ -211,7 +211,7 @@ void aggressor_ensure_beacon(AggressorState *state, const char *id);
 
 /*
  * Get the AggressorConfig associated with this VM. Returns NULL if
- * aggressor_init() hasn't been called yet.
+ * aggressor_new() hasn't been called yet.
  */
 AggressorConfig *aggressor_get_config(SlpVM *vm);
 

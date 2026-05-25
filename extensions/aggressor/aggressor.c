@@ -122,7 +122,7 @@ const char *aggressor_get_command_help(AggressorState *state, const char *name) 
     return NULL;
 }
 
-void aggressor_deinit(AggressorState *state) {
+void aggressor_free(AggressorState *state) {
     if (!state) return;
     for (int i = 0; i < state->command_count; i++) {
         free(state->commands[i].name);
@@ -571,7 +571,7 @@ static const char *dispatched_functions[] = {
  * Public API
  * ----------------------------------------------------------------------- */
 
-AggressorState *aggressor_init(SlpVM *vm, AggressorConfig *config) {
+AggressorState *aggressor_new(SlpVM *vm, AggressorConfig *config) {
     AggressorState *state = malloc(sizeof(AggressorState));
     memset(state, 0, sizeof(AggressorState));
 

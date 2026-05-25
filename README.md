@@ -204,7 +204,7 @@ make bench
 
 ## Embedding the Library
 
-The `sleepy` VM is designed to be easily embedded directly into your own C/C++ applications. It requires you to define a custom allocator for zero-dependency memory management. 
+The `slp` VM is designed to be easily embedded directly into your own C/C++ applications. It requires you to define a custom allocator for zero-dependency memory management. 
 
 ### Basic Embedding
 
@@ -279,7 +279,7 @@ int main() {
         .fallback = NULL,       // Use the safe default no-op fallback for unknown functions
         .user_data = NULL       // Optional context pointer passed into all overrides
     };
-    AggressorState *ag_state = aggressor_init(vm, &config);
+    AggressorState *ag_state = aggressor_new(vm, &config);
 
     // 1. Override specific native Aggressor functions
     aggressor_set(ag_state, "blog", my_blog_override);
@@ -295,7 +295,7 @@ int main() {
     slp_vm_interpret(vm, script);
 
     // Clean up
-    aggressor_deinit(ag_state);
+    aggressor_free(ag_state);
     slp_vm_free(vm);
     return 0;
 }
