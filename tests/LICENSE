@@ -1,0 +1,16 @@
+Test Suite License and Attribution
+
+The test fixtures and regression tests included in this directory (including `tests/fixtures/` and `tests/fixtures_vm/`) are derived or copied directly from the reference implementation of the Sleep programming language (jsleep).
+
+* **Original Author**: Raphael Mudge
+* **Original Project URI**: https://sleep.dashnine.org/
+* **License**: Creative Commons Attribution-ShareAlike 3.0 United States License (CC BY-SA 3.0 US)
+
+You may distribute or modify these test fixtures under the terms of the CC BY-SA 3.0 US License. 
+For the full text of the license, please visit:
+https://creativecommons.org/licenses/by-sa/3.0/us/
+
+--------------------------------------------------------------------------------
+
+Note on the Core Implementation License:
+The core C implementation of the Sleep compiler, parser, VM, and CLI tools in the parent directories (excluding the test fixtures) is an independent C implementation of the language and is separately licensed under the terms of the MIT License (see the root LICENSE file).

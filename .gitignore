@@ -1,0 +1,27 @@
+# Build artifacts (out-of-source)
+build/
+bin/
+dist/
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test coverage
+*.gcda
+*.gcno
+*.gcov
+coverage.info
+
+# Runtime artifacts
+.slp_history

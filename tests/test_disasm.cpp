@@ -1,0 +1,92 @@
+#include "doctest.h"
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+extern "C" {
+#include "slp_common.h"
+#include "slp_core.h"
+#include "slp_value.h"
+#include "slp_vm.h"
+#include "slp_compiler.h"
+#include "slp_parser.h"
+#include "slp_ast.h"
+#include "slp_disasm.h"
+
+static void *td_alloc(void *ptr, size_t size, void *ud) {
+    (void)ud;
+    if (size == 0) { free(ptr); return NULL; }
+    return realloc(ptr, size);
+}
+static SlpAllocator td_allocator = {td_alloc, NULL};
+}
+
+TEST_CASE("Disassembler: Opcode names") {
+    CHECK(strcmp(slp_opcode_name(OP_PUSH_NULL), "PUSH_NULL") == 0);
+    CHECK(strcmp(slp_opcode_name(OP_ADD), "ADD") == 0);
+    CHECK(strcmp(slp_opcode_name(OP_RETURN), "RETURN") == 0);
+    CHECK(strcmp(slp_opcode_name(OP_HALT), "HALT") == 0);
+}
+
+TEST_CASE("Disassembler: Instruction & Chunk Disassembly") {
+    SlpVM *vm = slp_vm_new(&td_allocator);
+    REQUIRE(vm != nullptr);
+
+    const char *source = "$x = 10; $y = $x + 2;";
+    SlpParser parser;
+    slp_parser_init(&parser, source, &td_allocator);
+    SlpASTNode *ast = slp_parser_parse(&parser);
+    REQUIRE(ast != nullptr);
+
+    SlpObjFunction *fn = slp_compile(vm, ast, &td_allocator);
+    REQUIRE(fn != nullptr);
+
+    // Let's disassemble the chunk to a temporary file
+    FILE *tmp = tmpfile();
+    REQUIRE(tmp != nullptr);
+
+    slp_disasm_chunk(fn->chunk, "test_script", tmp);
+
+    // Read the file contents back to verify
+    rewind(tmp);
+    char buffer[4096];
+    size_t bytes_read = fread(buffer, 1, sizeof(buffer) - 1, tmp);
+    buffer[bytes_read] = '\0';
+    fclose(tmp);
+
+    // Verify key disassembler output markers are present
+    CHECK(strstr(buffer, "=== test_script ===") != nullptr);
+    CHECK(strstr(buffer, "PUSH_CONST") != nullptr);
+    CHECK(strstr(buffer, "STORE_GLOBAL") != nullptr);
+    CHECK(strstr(buffer, "LOAD_GLOBAL") != nullptr);
+    CHECK(strstr(buffer, "ADD") != nullptr);
+    CHECK(strstr(buffer, "RETURN") != nullptr);
+
+    slp_parser_free_node(ast, &td_allocator);
+    slp_vm_free(vm);
+}
+
+TEST_CASE("Disassembler: single-byte local operand does not desync the stream") {
+    // OP_LOAD_LOCAL carries a 1-byte slot operand. If the disassembler reads a
+    // 2-byte short it would consume the following OP_RETURN as operand data and
+    // drop it from the output. Build the chunk by hand and verify both appear.
+    SlpChunk chunk;
+    slp_chunk_init(&chunk, &td_allocator);
+    slp_chunk_write(&chunk, OP_LOAD_LOCAL, 1);
+    slp_chunk_write(&chunk, 3, 1); // slot operand (one byte)
+    slp_chunk_write(&chunk, OP_RETURN, 1);
+
+    FILE *tmp = tmpfile();
+    REQUIRE(tmp != nullptr);
+    slp_disasm_chunk(&chunk, "local_test", tmp);
+    rewind(tmp);
+    char buffer[2048];
+    size_t n = fread(buffer, 1, sizeof(buffer) - 1, tmp);
+    buffer[n] = '\0';
+    fclose(tmp);
+
+    CHECK(strstr(buffer, "LOAD_LOCAL") != nullptr);
+    CHECK(strstr(buffer, "RETURN") != nullptr); // would be missing if desynced
+
+    slp_chunk_free(&chunk);
+}

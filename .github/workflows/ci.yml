@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'extensions/**'
+      - 'deps/**'
+      - 'tools/**'
+      - 'Makefile'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'extensions/**'
+      - 'deps/**'
+      - 'tools/**'
+      - 'Makefile'
+      - '.github/workflows/ci.yml'
+
+jobs:
+  test-cross-platform:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install compilers (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc g++
+
+      - name: Verify clean build
+        run: |
+          make clean
+          make all
+
+      - name: Run unit tests
+        run: |
+          make test
+
+      # Runs while the binaries from `make all` above are still on disk
+      - name: Verify Sleep Code Formatting / Linting
+        run: |
+          make format-check
+
+      - name: Run unit tests under UBSan (all)
+        run: |
+          make clean
+          make debug
+
+      - name: Run unit tests under ASan+UBSan (Linux only)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          make clean
+          make debug-asan CC=gcc CXX=g++
+
+      - name: Run performance benchmarks
+        run: |
+          make clean
+          make bench

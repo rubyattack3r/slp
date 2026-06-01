@@ -1,0 +1,127 @@
+name: Rolling Build
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Build Linux targets
+        run: |
+          nix develop -c make clean
+          nix develop -c make all tools
+          nix develop -c make amalgamate
+
+          # Package Linux
+          mkdir -p slp-linux-amd64/bin slp-linux-amd64/lib slp-linux-amd64/include slp-linux-amd64/src
+          cp bin/slp bin/slp_fmt bin/slpd bin/bench_slp slp-linux-amd64/bin/
+          cp bin/libslp.a slp-linux-amd64/lib/
+          cp dist/slp.h slp-linux-amd64/include/
+          cp dist/slp.c slp-linux-amd64/src/
+          tar -czf slp-rolling-linux-amd64.tar.gz slp-linux-amd64/
+
+      - name: Build Windows targets (Zig Cross-Compile)
+        run: |
+          nix develop -c make clean
+          nix develop -c make all tools CC="zig cc -target x86_64-windows" CXX="zig c++ -target x86_64-windows"
+          nix develop -c make amalgamate
+
+          # Package Windows
+          mkdir -p slp-windows-amd64/bin slp-windows-amd64/lib slp-windows-amd64/include slp-windows-amd64/src
+          cp bin/slp.exe bin/slp_fmt.exe bin/slpd.exe bin/bench_slp.exe slp-windows-amd64/bin/
+          cp bin/libslp.a slp-windows-amd64/lib/
+          cp dist/slp.h slp-windows-amd64/include/
+          cp dist/slp.c slp-windows-amd64/src/
+          zip -r slp-rolling-windows-amd64.zip slp-windows-amd64/
+
+      - name: Upload Linux archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64
+          path: slp-rolling-linux-amd64.tar.gz
+          retention-days: 1
+
+      - name: Upload Windows archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64
+          path: slp-rolling-windows-amd64.zip
+          retention-days: 1
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build macOS Universal targets
+        run: |
+          make clean
+          make all tools CC="clang -arch arm64 -arch x86_64" CXX="clang++ -arch arm64 -arch x86_64"
+          make amalgamate
+
+          # Package macOS
+          mkdir -p slp-macos-universal/bin slp-macos-universal/lib slp-macos-universal/include slp-macos-universal/src
+          cp bin/slp bin/slp_fmt bin/slpd bin/bench_slp slp-macos-universal/bin/
+          cp bin/libslp.a slp-macos-universal/lib/
+          cp dist/slp.h slp-macos-universal/include/
+          cp dist/slp.c slp-macos-universal/src/
+          tar -czf slp-rolling-macos-universal.tar.gz slp-macos-universal/
+
+      - name: Upload macOS archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: slp-rolling-macos-universal.tar.gz
+          retention-days: 1
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs: [build-linux-windows, build-macos]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Linux release archive
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-amd64
+
+      - name: Download Windows release archive
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-amd64
+
+      - name: Download macOS release archive
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-universal
+
+      - name: Update Rolling Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rolling
+          name: Rolling Build
+          prerelease: true
+          draft: false
+          files: |
+            slp-rolling-linux-amd64.tar.gz
+            slp-rolling-windows-amd64.zip
+            slp-rolling-macos-universal.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
