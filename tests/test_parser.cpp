@@ -279,3 +279,32 @@ TEST_CASE("Parser: string with too many interpolations errors, no overflow") {
   if (root) slp_parser_free_node(root, &test_allocator);
 }
 
+TEST_CASE("Parser parses optional semicolons and newlines correctly") {
+  const char *source = 
+    "local('$a')\n"
+    "$a = 1\n"
+    "local('$b')\n"
+    "{\n"
+    "  $b = 2\n"
+    "}\n";
+  SlpParser parser;
+  slp_parser_init(&parser, source, &test_allocator);
+
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_EQ(parser.had_error, false);
+  REQUIRE(root != NULL);
+  slp_parser_free_node(root, &test_allocator);
+}
+
+TEST_CASE("Parser parses optional commas in argument lists correctly") {
+  const char *source = "bof_pack($1, \"zz\", $2 $2);";
+  SlpParser parser;
+  slp_parser_init(&parser, source, &test_allocator);
+
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_EQ(parser.had_error, false);
+  REQUIRE(root != NULL);
+  slp_parser_free_node(root, &test_allocator);
+}
+
+

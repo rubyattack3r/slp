@@ -714,12 +714,20 @@ static SlpASTNode *command(SlpParser *parser, SlpASTNode *left,
   SlpASTNode *node = allocate_node(parser, type);
   node->as.control.value = NULL;
 
+  bool allow_argument = true;
+  if (op.type == SLP_TOKEN_RETURN || op.type == SLP_TOKEN_YIELD) {
+    if (parser->current.line > parser->previous.line) {
+      allow_argument = false;
+    }
+  }
+
   // For assert, we may have: assert expr : "message"
   if (op.type == SLP_TOKEN_ASSERT) {
     if (!check(parser, SLP_TOKEN_SEMICOLON) &&
         !check(parser, SLP_TOKEN_EOF) &&
         !check(parser, SLP_TOKEN_RIGHT_PAREN) &&
-        !check(parser, SLP_TOKEN_RIGHT_BRACE)) {
+        !check(parser, SLP_TOKEN_RIGHT_BRACE) &&
+        allow_argument) {
       node->as.control.value = expression(parser);
       // Check for optional : "message"
       if (match(parser, SLP_TOKEN_COLON)) {
@@ -737,7 +745,8 @@ static SlpASTNode *command(SlpParser *parser, SlpASTNode *left,
     if (!check(parser, SLP_TOKEN_SEMICOLON) &&
         !check(parser, SLP_TOKEN_EOF) &&
         !check(parser, SLP_TOKEN_RIGHT_PAREN) &&
-        !check(parser, SLP_TOKEN_RIGHT_BRACE)) {
+        !check(parser, SLP_TOKEN_RIGHT_BRACE) &&
+        allow_argument) {
       node->as.control.value = expression(parser);
     }
   }
@@ -1026,10 +1035,14 @@ static SlpASTNode *expression(SlpParser *parser) {
 
 static SlpASTNode *expression_statement(SlpParser *parser) {
   SlpASTNode *expr = expression(parser);
-  if (!check(parser, SLP_TOKEN_EOF)) {
-    consume(parser, SLP_TOKEN_SEMICOLON, "Expect ';' after statement.");
+  if (match(parser, SLP_TOKEN_SEMICOLON)) {
+    // Semicolon matched and consumed
+  } else if (check(parser, SLP_TOKEN_RIGHT_BRACE) || check(parser, SLP_TOKEN_EOF)) {
+    // Semicolon optional before closing brace or EOF
+  } else if (parser->current.line > parser->previous.line) {
+    // Newline acts as statement separator
   } else {
-    match(parser, SLP_TOKEN_SEMICOLON);
+    consume(parser, SLP_TOKEN_SEMICOLON, "Expect ';' after statement.");
   }
   return expr;
 }
@@ -1399,7 +1412,9 @@ SlpASTNode **parse_args(SlpParser *parser, size_t *count,
       args[(*count)++] = arg_node;
       if (check(parser, endToken))
         break;
-    } while (match(parser, SLP_TOKEN_COMMA) && !parser->had_error);
+      // Consume comma if present. If not present, we allow continuation if not at end.
+      match(parser, SLP_TOKEN_COMMA);
+    } while (!parser->had_error);
   }
   return args;
 }
