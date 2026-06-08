@@ -97,8 +97,8 @@ static SlpTokenType check_keyword(SlpLexer *lexer, int start, int length,
 
 static SlpTokenType identifier_type(SlpLexer *lexer) {
   // Check for built-in binary predicates
-  const char *preds[] = {"cmp", "eq",   "gt",      "hasmatch", "is",
-                         "isa", "isin", "ismatch", "iswm",     "in",
+  const char *preds[] = {"cmp", "eq",   "ge",      "gt",      "hasmatch", "is",
+                         "isa", "isin", "ismatch", "iswm",     "in",      "le",
                          "lt",  "ne",   NULL};
   for (int i = 0; preds[i] != NULL; i++) {
     size_t len = slp_utils_strlen(preds[i]);

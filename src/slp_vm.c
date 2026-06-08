@@ -1583,6 +1583,20 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
                 get_string_repr(a, &sa_chars, &sa_len, buf_a, sizeof(buf_a));
                 get_string_repr(b, &sb_chars, &sb_len, buf_b, sizeof(buf_b));
                 result = (strcmp(sa_chars, sb_chars) > 0);
+            } else if (strcmp(pred_name->chars, "ge") == 0) {
+                const char *sa_chars, *sb_chars;
+                uint32_t sa_len, sb_len;
+                char buf_a[64], buf_b[64];
+                get_string_repr(a, &sa_chars, &sa_len, buf_a, sizeof(buf_a));
+                get_string_repr(b, &sb_chars, &sb_len, buf_b, sizeof(buf_b));
+                result = (strcmp(sa_chars, sb_chars) >= 0);
+            } else if (strcmp(pred_name->chars, "le") == 0) {
+                const char *sa_chars, *sb_chars;
+                uint32_t sa_len, sb_len;
+                char buf_a[64], buf_b[64];
+                get_string_repr(a, &sa_chars, &sa_len, buf_a, sizeof(buf_a));
+                get_string_repr(b, &sb_chars, &sb_len, buf_b, sizeof(buf_b));
+                result = (strcmp(sa_chars, sb_chars) <= 0);
             } else if (strcmp(pred_name->chars, "cmp") == 0) {
                 const char *sa_chars, *sb_chars;
                 uint32_t sa_len, sb_len;

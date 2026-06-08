@@ -148,3 +148,23 @@ TEST_CASE("Lexer successfully lexes multiple operators") {
   token = slp_lexer_scan_token(&lexer);
   CHECK_EQ(token.type, SLP_TOKEN_EOF);
 }
+
+TEST_CASE("Lexer identifies ge and le as built-in binary predicates") {
+  const char *source = "ge le";
+  SlpLexer lexer;
+  slp_lexer_init(&lexer, source, &test_allocator);
+
+  SlpToken token = slp_lexer_scan_token(&lexer);
+  CHECK_EQ(token.type, SLP_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE);
+  CHECK_EQ(token.length, 2);
+  CHECK_EQ(strncmp(token.start, "ge", 2), 0);
+
+  token = slp_lexer_scan_token(&lexer);
+  CHECK_EQ(token.type, SLP_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE);
+  CHECK_EQ(token.length, 2);
+  CHECK_EQ(strncmp(token.start, "le", 2), 0);
+
+  token = slp_lexer_scan_token(&lexer);
+  CHECK_EQ(token.type, SLP_TOKEN_EOF);
+}
+

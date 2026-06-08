@@ -328,9 +328,9 @@ static SlpASTNode *parse_double_quoted_string(SlpParser *parser, SlpToken *token
             char sigil = *p;
             const char *var_start = p + 1;
             const char *var_p = var_start;
-            while (var_p < end && ((*var_p >= 'a' && *var_p <= 'z') || 
-                                   (*var_p >= 'A' && *var_p <= 'Z') || 
-                                   (*var_p >= '0' && *var_p <= '9') || 
+            while (var_p < end && ((*var_p >= 'a' && *var_p <= 'z') ||
+                                   (*var_p >= 'A' && *var_p <= 'Z') ||
+                                   (*var_p >= '0' && *var_p <= '9') ||
                                    *var_p == '_')) {
                 var_p++;
             }
@@ -1162,12 +1162,17 @@ static SlpASTNode *for_statement(SlpParser *parser) {
 
 static SlpASTNode *foreach_statement(SlpParser *parser) {
   SlpASTNode *key_node = NULL, *val_node = NULL;
-  if (match(parser, SLP_TOKEN_SCALAR)) {
+  if (check(parser, SLP_TOKEN_SCALAR) || check(parser, SLP_TOKEN_PERCENT) || check(parser, SLP_TOKEN_AT)) {
+    advance(parser);
     val_node = scalar(parser, NULL, false);
     if (match(parser, SLP_TOKEN_ARROW)) {
       key_node = val_node;
-      consume(parser, SLP_TOKEN_SCALAR, "Expect value variable.");
-      val_node = scalar(parser, NULL, false);
+      if (check(parser, SLP_TOKEN_SCALAR) || check(parser, SLP_TOKEN_PERCENT) || check(parser, SLP_TOKEN_AT)) {
+        advance(parser);
+        val_node = scalar(parser, NULL, false);
+      } else {
+        error(parser, "Expect value variable.");
+      }
     }
   }
   consume(parser, SLP_TOKEN_LEFT_PAREN,
@@ -1177,7 +1182,7 @@ static SlpASTNode *foreach_statement(SlpParser *parser) {
   SlpASTNode *body = block(parser);
   SlpASTNode *node = allocate_node(parser, SLP_AST_FOREACH);
   node->as.foreach.index = (key_node) ? key_node->as.string_val : NULL;
-  
+
   if (val_node) {
       node->as.foreach.value = val_node->as.string_val;
   } else {
@@ -1185,7 +1190,7 @@ static SlpASTNode *foreach_statement(SlpParser *parser) {
       if (stub) slp_utils_strcpy(stub, "stub_var");
       node->as.foreach.value = stub;
   }
-  
+
   if (key_node) SLP_FREE(parser->allocator, key_node);
   if (val_node) SLP_FREE(parser->allocator, val_node);
 

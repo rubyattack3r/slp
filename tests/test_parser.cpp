@@ -307,4 +307,118 @@ TEST_CASE("Parser parses optional commas in argument lists correctly") {
   slp_parser_free_node(root, &test_allocator);
 }
 
+TEST_CASE("Parser: parses ge and le built-in binary predicates correctly") {
+  const char *source = "$a ge $b; $c le $d;";
+  SlpParser parser;
+  slp_parser_init(&parser, source, &test_allocator);
+
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_EQ(parser.had_error, false);
+  REQUIRE(root != NULL);
+  REQUIRE(root->type == SLP_AST_SCRIPT);
+  REQUIRE(root->as.block.count == 2);
+
+  SlpASTNode *ge_expr = root->as.block.statements[0];
+  CHECK_EQ(ge_expr->type, SLP_AST_BINOP);
+  CHECK_EQ(ge_expr->as.binop.op.type, SLP_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE);
+  CHECK_EQ(strncmp(ge_expr->as.binop.op.start, "ge", 2), 0);
+
+  SlpASTNode *le_expr = root->as.block.statements[1];
+  CHECK_EQ(le_expr->type, SLP_AST_BINOP);
+  CHECK_EQ(le_expr->as.binop.op.type, SLP_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE);
+  CHECK_EQ(strncmp(le_expr->as.binop.op.start, "le", 2), 0);
+
+  slp_parser_free_node(root, &test_allocator);
+}
+
+TEST_CASE("Parser: parses foreach with percent and at loop variables") {
+  const char *source = "foreach %k => $v (%data) {} foreach @item (@data) {}";
+  SlpParser parser;
+  slp_parser_init(&parser, source, &test_allocator);
+
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_EQ(parser.had_error, false);
+  REQUIRE(root != NULL);
+  REQUIRE(root->type == SLP_AST_SCRIPT);
+  REQUIRE(root->as.block.count == 2);
+
+  SlpASTNode *fe1 = root->as.block.statements[0];
+  CHECK_EQ(fe1->type, SLP_AST_FOREACH);
+  CHECK_EQ(strcmp(fe1->as.foreach.index, "k"), 0);
+  CHECK_EQ(strcmp(fe1->as.foreach.value, "v"), 0);
+
+  SlpASTNode *fe2 = root->as.block.statements[1];
+  CHECK_EQ(fe2->type, SLP_AST_FOREACH);
+  CHECK(fe2->as.foreach.index == NULL);
+  CHECK_EQ(strcmp(fe2->as.foreach.value, "item"), 0);
+
+  slp_parser_free_node(root, &test_allocator);
+}
+
+TEST_CASE("Parser: parses comma-less function call arguments") {
+  const char *source = "foo(1 2 3);";
+  SlpParser parser;
+  slp_parser_init(&parser, source, &test_allocator);
+
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_EQ(parser.had_error, false);
+  REQUIRE(root != NULL);
+  REQUIRE(root->type == SLP_AST_SCRIPT);
+  REQUIRE(root->as.block.count == 1);
+
+  SlpASTNode *call = root->as.block.statements[0];
+  CHECK_EQ(call->type, SLP_AST_CALL);
+  CHECK_EQ(call->as.call.arg_count, 3);
+  CHECK_EQ(call->as.call.args[0]->type, SLP_AST_ARG);
+  CHECK_EQ(call->as.call.args[0]->as.arg.value->type, SLP_AST_NUMBER);
+  CHECK_EQ(call->as.call.args[1]->type, SLP_AST_ARG);
+  CHECK_EQ(call->as.call.args[1]->as.arg.value->type, SLP_AST_NUMBER);
+  CHECK_EQ(call->as.call.args[2]->type, SLP_AST_ARG);
+  CHECK_EQ(call->as.call.args[2]->as.arg.value->type, SLP_AST_NUMBER);
+
+  slp_parser_free_node(root, &test_allocator);
+}
+
+TEST_CASE("Parser: optional semicolons via newlines") {
+  const char *source = "$x = 5\n$y = 10\n";
+  SlpParser parser;
+  slp_parser_init(&parser, source, &test_allocator);
+
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_EQ(parser.had_error, false);
+  REQUIRE(root != NULL);
+  REQUIRE(root->type == SLP_AST_SCRIPT);
+  REQUIRE(root->as.block.count == 2);
+
+  slp_parser_free_node(root, &test_allocator);
+}
+
+TEST_CASE("Parser: return keyword on newline restricts argument consumption") {
+  const char *source = "sub test_ret {\nreturn\n$x = 5;\n}";
+  SlpParser parser;
+  slp_parser_init(&parser, source, &test_allocator);
+
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_EQ(parser.had_error, false);
+  REQUIRE(root != NULL);
+  REQUIRE(root->type == SLP_AST_SCRIPT);
+  REQUIRE(root->as.block.count == 1);
+
+  SlpASTNode *sub_decl = root->as.block.statements[0];
+  CHECK_EQ(sub_decl->type, SLP_AST_ENV_BRIDGE);
+  CHECK_EQ(strcmp(sub_decl->as.env_bridge.keyword, "sub"), 0);
+  CHECK_EQ(strcmp(sub_decl->as.env_bridge.identifier, "test_ret"), 0);
+  SlpASTNode *sub_body = sub_decl->as.env_bridge.body;
+  REQUIRE(sub_body != NULL);
+  REQUIRE(sub_body->as.block.count == 2);
+
+  SlpASTNode *ret_stmt = sub_body->as.block.statements[0];
+  CHECK_EQ(ret_stmt->type, SLP_AST_RETURN);
+  // The argument of return should be NULL (not $x = 5) because $x is on a new line.
+  CHECK(ret_stmt->as.control.value == NULL);
+
+  slp_parser_free_node(root, &test_allocator);
+}
+
+
 

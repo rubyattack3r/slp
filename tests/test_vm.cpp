@@ -433,6 +433,35 @@ TEST_CASE("VM: binary predicate lt/gt") {
     slp_vm_free(vm);
 }
 
+TEST_CASE("VM: binary predicate ge/le") {
+    SlpVM *vm = slp_vm_new(&vm_allocator);
+    SlpResult r = slp_vm_interpret(vm,
+        "$r1 = (2 ge 1);"
+        "$r2 = (1 ge 1);"
+        "$r3 = (1 ge 2);"
+        "$r4 = (1 le 2);"
+        "$r5 = (1 le 1);"
+        "$r6 = (2 le 1);"
+        "$r7 = (\"abc\" ge \"abc\");"
+        "$r8 = (\"abc\" le \"abc\");"
+        "$r9 = (\"abd\" ge \"abc\");"
+        "$r10 = (\"abc\" le \"abd\");"
+    );
+    REQUIRE(r == SLP_OK);
+    CHECK(SLP_AS_BOOL(get_global(vm, "$r1")) == true);
+    CHECK(SLP_AS_BOOL(get_global(vm, "$r2")) == true);
+    CHECK(SLP_AS_BOOL(get_global(vm, "$r3")) == false);
+    CHECK(SLP_AS_BOOL(get_global(vm, "$r4")) == true);
+    CHECK(SLP_AS_BOOL(get_global(vm, "$r5")) == true);
+    CHECK(SLP_AS_BOOL(get_global(vm, "$r6")) == false);
+    CHECK(SLP_AS_BOOL(get_global(vm, "$r7")) == true);
+    CHECK(SLP_AS_BOOL(get_global(vm, "$r8")) == true);
+    CHECK(SLP_AS_BOOL(get_global(vm, "$r9")) == true);
+    CHECK(SLP_AS_BOOL(get_global(vm, "$r10")) == true);
+    slp_vm_free(vm);
+}
+
+
 TEST_CASE("VM: negated binary predicate") {
     SlpVM *vm = slp_vm_new(&vm_allocator);
     SlpResult r = slp_vm_interpret(vm,
