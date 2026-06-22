@@ -81,6 +81,7 @@ struct SlpVM {
     int try_handler_count;
 
     SlpObjArray *last_regex_matches;
+    void *user_data;
 };
 
 typedef enum {
@@ -132,5 +133,7 @@ int64_t slp_vm_ffi_get_long(SlpVM *vm, int slot);
 const char *slp_vm_ffi_get_string(SlpVM *vm, int slot);
 
 void slp_vm_runtime_error(SlpVM *vm, const char *msg);
+
+double slp_value_as_number(SlpValue v);
 
 #endif // SLP_VM_H

@@ -99,7 +99,7 @@ SlpValue slp_vm_peek(SlpVM *vm, int distance) {
 // their leading numeric prefix (strtod, so "5abc" -> 5 and "abc" -> 0). Other
 // objects (arrays/hashes/etc.) are 0. Replaces raw SLP_AS_NUM in arithmetic,
 // where reading a non-number's union field previously yielded garbage.
-static double slp_value_as_number(SlpValue v) {
+double slp_value_as_number(SlpValue v) {
     if (SLP_IS_NUM(v)) return SLP_AS_NUM(v);
     if (SLP_IS_BOOL(v)) return SLP_AS_BOOL(v) ? 1.0 : 0.0;
     if (SLP_IS_NULL(v)) return 0.0;

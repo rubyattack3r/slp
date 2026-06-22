@@ -11,73 +11,73 @@ static void format_node(SlpASTNode *node, SlpStringBuffer *buffer,
                         int depth);
 
 typedef enum {
-  PREC_NONE = 0,
-  PREC_ASSIGNMENT = 30,
-  PREC_LOR = 31,
-  PREC_LAND = 32,
-  PREC_BIT_OR = 33,
-  PREC_BIT_XOR = 34,
-  PREC_BIT_AND = 35,
-  PREC_EQUALITY = 36,
-  PREC_COMPARISON = 37,
-  PREC_SHIFT = 38,
-  PREC_CONCAT = 39,
-  PREC_TERM = 40,
-  PREC_FACTOR = 41,
-  PREC_UNARY = 42,
-  PREC_INCDEC = 43,
-  PREC_EXP = 44,
-  PREC_CALL = 45,
-  PREC_PRIMARY = 46
+  AST_PREC_NONE = 0,
+  AST_PREC_ASSIGNMENT = 30,
+  AST_PREC_LOR = 31,
+  AST_PREC_LAND = 32,
+  AST_PREC_BIT_OR = 33,
+  AST_PREC_BIT_XOR = 34,
+  AST_PREC_BIT_AND = 35,
+  AST_PREC_EQUALITY = 36,
+  AST_PREC_COMPARISON = 37,
+  AST_PREC_SHIFT = 38,
+  AST_PREC_CONCAT = 39,
+  AST_PREC_TERM = 40,
+  AST_PREC_FACTOR = 41,
+  AST_PREC_UNARY = 42,
+  AST_PREC_INCDEC = 43,
+  AST_PREC_EXP = 44,
+  AST_PREC_CALL = 45,
+  AST_PREC_PRIMARY = 46
 } PrecedenceLevel;
 
 static PrecedenceLevel get_node_precedence(SlpASTNode *node) {
-  if (!node) return PREC_PRIMARY;
+  if (!node) return AST_PREC_PRIMARY;
   switch (node->type) {
   case SLP_AST_ASSIGNMENT:
-    return PREC_ASSIGNMENT;
+    return AST_PREC_ASSIGNMENT;
   case SLP_AST_UNARYOP:
-    return PREC_UNARY;
+    return AST_PREC_UNARY;
   case SLP_AST_BINOP: {
     const char *op = node->as.binop.op.start;
     size_t len = node->as.binop.op.length;
-    if (!op || len == 0) return PREC_PRIMARY;
-    if (len == 2 && op[0] == '*' && op[1] == '*') return PREC_EXP;
-    if (len == 2 && op[0] == '<' && op[1] == '<') return PREC_SHIFT;
-    if (len == 2 && op[0] == '>' && op[1] == '>') return PREC_SHIFT;
-    if (len == 1 && op[0] == '.') return PREC_CONCAT;
-    if (len == 1 && (op[0] == '+' || op[0] == '-')) return PREC_TERM;
-    if (len == 1 && (op[0] == '*' || op[0] == '/' || op[0] == '%')) return PREC_FACTOR;
-    if (len == 1 && op[0] == 'x') return PREC_FACTOR;
-    if (len == 1 && (op[0] == '&')) return PREC_BIT_AND;
-    if (len == 1 && (op[0] == '|')) return PREC_BIT_OR;
-    if (len == 1 && (op[0] == '^')) return PREC_BIT_XOR;
-    if (len == 2 && op[0] == '&' && op[1] == '&') return PREC_LAND;
-    if (len == 2 && op[0] == '|' && op[1] == '|') return PREC_LOR;
-    if (len == 3 && memcmp(op, "and", 3) == 0) return PREC_LAND;
-    if (len == 2 && memcmp(op, "or", 2) == 0) return PREC_LOR;
-    if (len == 2 && memcmp(op, "in", 2) == 0) return PREC_COMPARISON;
-    if (len == 2 && memcmp(op, "is", 2) == 0) return PREC_EQUALITY;
-    if (len == 2 && memcmp(op, "eq", 2) == 0) return PREC_EQUALITY;
-    if (len == 2 && memcmp(op, "ne", 2) == 0) return PREC_EQUALITY;
-    if (len == 2 && memcmp(op, "gt", 2) == 0) return PREC_COMPARISON;
-    if (len == 2 && memcmp(op, "ge", 2) == 0) return PREC_COMPARISON;
-    if (len == 2 && memcmp(op, "lt", 2) == 0) return PREC_COMPARISON;
-    if (len == 2 && memcmp(op, "le", 2) == 0) return PREC_COMPARISON;
-    if (len == 2 && memcmp(op, "=~", 2) == 0) return PREC_EQUALITY;
-    if (len == 3 && memcmp(op, "!=~", 3) == 0) return PREC_EQUALITY;
-    if (len == 3 && memcmp(op, "<=>", 3) == 0) return PREC_EQUALITY;
-    if (len == 2 && op[0] == '=' && op[1] == '=') return PREC_EQUALITY;
-    if (len == 2 && op[0] == '!' && op[1] == '=') return PREC_EQUALITY;
-    if (len == 7 && memcmp(op, "ismatch", 7) == 0) return PREC_EQUALITY;
-    if (len == 8 && memcmp(op, "hasmatch", 8) == 0) return PREC_EQUALITY;
-    if (len == 4 && memcmp(op, "iswm", 4) == 0) return PREC_EQUALITY;
-    if (len == 3 && memcmp(op, "isa", 3) == 0) return PREC_COMPARISON;
-    if (len == 1 && (op[0] == '<' || op[0] == '>')) return PREC_COMPARISON;
-    return PREC_PRIMARY;
+    if (!op || len == 0) return AST_PREC_PRIMARY;
+    if (len == 2 && op[0] == '*' && op[1] == '*') return AST_PREC_EXP;
+    if (len == 2 && op[0] == '<' && op[1] == '<') return AST_PREC_SHIFT;
+    if (len == 2 && op[0] == '>' && op[1] == '>') return AST_PREC_SHIFT;
+    if (len == 1 && op[0] == '.') return AST_PREC_CONCAT;
+    if (len == 1 && (op[0] == '+' || op[0] == '-')) return AST_PREC_TERM;
+    if (len == 1 && (op[0] == '*' || op[0] == '/' || op[0] == '%')) return AST_PREC_FACTOR;
+    if (len == 1 && op[0] == 'x') return AST_PREC_FACTOR;
+    if (len == 1 && (op[0] == '&')) return AST_PREC_BIT_AND;
+    if (len == 1 && (op[0] == '|')) return AST_PREC_BIT_OR;
+    if (len == 1 && (op[0] == '^')) return AST_PREC_BIT_XOR;
+    if (len == 2 && op[0] == '&' && op[1] == '&') return AST_PREC_LAND;
+    if (len == 2 && op[0] == '|' && op[1] == '|') return AST_PREC_LOR;
+    if (len == 3 && memcmp(op, "and", 3) == 0) return AST_PREC_LAND;
+    if (len == 2 && memcmp(op, "or", 2) == 0) return AST_PREC_LOR;
+    if (len == 2 && memcmp(op, "in", 2) == 0) return AST_PREC_COMPARISON;
+    if (len == 2 && memcmp(op, "is", 2) == 0) return AST_PREC_EQUALITY;
+    if (len == 2 && memcmp(op, "eq", 2) == 0) return AST_PREC_EQUALITY;
+    if (len == 2 && memcmp(op, "ne", 2) == 0) return AST_PREC_EQUALITY;
+    if (len == 2 && memcmp(op, "gt", 2) == 0) return AST_PREC_COMPARISON;
+    if (len == 2 && memcmp(op, "ge", 2) == 0) return AST_PREC_COMPARISON;
+    if (len == 2 && memcmp(op, "lt", 2) == 0) return AST_PREC_COMPARISON;
+    if (len == 2 && memcmp(op, "le", 2) == 0) return AST_PREC_COMPARISON;
+    if (len == 2 && memcmp(op, "=~", 2) == 0) return AST_PREC_EQUALITY;
+    if (len == 3 && memcmp(op, "!=~", 3) == 0) return AST_PREC_EQUALITY;
+    if (len == 3 && memcmp(op, "<=>", 3) == 0) return AST_PREC_EQUALITY;
+    if (len == 2 && op[0] == '=' && op[1] == '=') return AST_PREC_EQUALITY;
+    if (len == 2 && op[0] == '!' && op[1] == '=') return AST_PREC_EQUALITY;
+    if (len == 7 && memcmp(op, "ismatch", 7) == 0) return AST_PREC_EQUALITY;
+    if (len == 8 && memcmp(op, "hasmatch", 8) == 0) return AST_PREC_EQUALITY;
+    if (len == 4 && memcmp(op, "iswm", 4) == 0) return AST_PREC_EQUALITY;
+    if (len == 3 && memcmp(op, "isa", 3) == 0) return AST_PREC_COMPARISON;
+    if (len == 1 && (op[0] == '<' || op[0] == '>')) return AST_PREC_COMPARISON;
+    return AST_PREC_PRIMARY;
   }
   default:
-    return PREC_PRIMARY;
+    return AST_PREC_PRIMARY;
   }
 }
 
@@ -1254,7 +1254,7 @@ static void format_node(SlpASTNode *node, SlpStringBuffer *buffer,
       }
     }
     
-    bool paren = (get_node_precedence(node->as.unaryop.operand) < PREC_UNARY);
+    bool paren = (get_node_precedence(node->as.unaryop.operand) < AST_PREC_UNARY);
     if (paren) slp_string_buffer_append_char(buffer, '(');
     format_node(node->as.unaryop.operand, buffer, depth);
     if (paren) slp_string_buffer_append_char(buffer, ')');
