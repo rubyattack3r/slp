@@ -294,7 +294,7 @@ static SlpValue builtin_join(SlpVM *vm, SlpValue *args, int argc) {
             } else if (SLP_IS_BOOL(val)) {
                 total_len += SLP_AS_BOOL(val) ? 4 : 5;
             } else if (SLP_IS_NULL(val)) {
-                total_len += 5;
+                // Treated as empty string, total_len += 0
             }
         }
     }
@@ -322,8 +322,7 @@ static SlpValue builtin_join(SlpVM *vm, SlpValue *args, int argc) {
                 strcpy(curr, s);
                 curr += strlen(s);
             } else if (SLP_IS_NULL(val)) {
-                strcpy(curr, "$null");
-                curr += 5;
+                // Treated as empty string, do nothing
             }
         }
     }
