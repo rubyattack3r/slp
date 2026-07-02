@@ -761,7 +761,7 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
                 sa = SLP_AS_BOOL(a) ? "true" : "false";
                 la = (uint32_t)strlen(sa);
             } else if (SLP_IS_NULL(a)) {
-                sa = "$null"; la = 5;
+                sa = ""; la = 0;
             }
             if (SLP_IS_OBJ(b) && SLP_OBJ_TYPE(b) == SLP_OBJ_STRING) {
                 SlpObjString *osb = SLP_AS_STRING(b);
@@ -773,7 +773,7 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
                 sb = SLP_AS_BOOL(b) ? "true" : "false";
                 lb = (uint32_t)strlen(sb);
             } else if (SLP_IS_NULL(b)) {
-                sb = "$null"; lb = 5;
+                sb = ""; lb = 0;
             }
             uint32_t total = la + lb;
             char *concat_buf = (char*)SLP_MALLOC(vm->allocator, total + 1);
