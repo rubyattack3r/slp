@@ -913,12 +913,51 @@ static SlpValue builtin_typeOf(SlpVM *vm, SlpValue *args, int argc) {
     return SLP_OBJ_VAL(slp_vm_copy_string(vm, "unknown", 7));
 }
 
+static void declare_global_name(SlpVM *vm, const char *name, uint32_t length) {
+    if (length == 0 || (name[0] != '$' && name[0] != '@' && name[0] != '%')) {
+        return;
+    }
+
+    SlpObjString *key = slp_vm_copy_string(vm, name, length);
+    SlpValue key_value = SLP_OBJ_VAL(key);
+    if (!SLP_IS_NULL(slp_obj_hash_get(vm->globals, key_value))) {
+        return;
+    }
+
+    /* Collection sigils must have a container immediately after declaration
+       so indexed assignments work before an explicit @()/ %() assignment. */
+    if (name[0] == '@') {
+        SlpObjArray *array = slp_vm_new_array(vm);
+        if (array) {
+            slp_obj_hash_set(vm->allocator, vm->globals, key_value,
+                             SLP_OBJ_VAL(array));
+        }
+    } else if (name[0] == '%') {
+        SlpObjHash *hash = slp_vm_new_hash(vm);
+        if (hash) {
+            slp_obj_hash_set(vm->allocator, vm->globals, key_value,
+                             SLP_OBJ_VAL(hash));
+        }
+    }
+}
+
 static SlpValue builtin_global(SlpVM *vm, SlpValue *args, int argc) {
-    if (argc < 2 || !SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_STRING)
-        return SLP_NULL_VAL;
-    if (argc >= 2) {
-        slp_obj_hash_set(vm->allocator, vm->globals, args[0], args[1]);
-        return args[1];
+    /* Sleep accepts whitespace-separated declaration names. Accept multiple
+       string arguments too, matching common Aggressor Script usage. */
+    for (int i = 0; i < argc; i++) {
+        if (!SLP_IS_OBJ(args[i]) || SLP_OBJ_TYPE(args[i]) != SLP_OBJ_STRING) {
+            continue;
+        }
+
+        SlpObjString *declarations = SLP_AS_STRING(args[i]);
+        const char *cursor = declarations->chars;
+        const char *end = declarations->chars + declarations->length;
+        while (cursor < end) {
+            while (cursor < end && isspace((unsigned char)*cursor)) cursor++;
+            const char *start = cursor;
+            while (cursor < end && !isspace((unsigned char)*cursor)) cursor++;
+            declare_global_name(vm, start, (uint32_t)(cursor - start));
+        }
     }
     return SLP_NULL_VAL;
 }
