@@ -133,7 +133,9 @@ TEST_CASE("Embed: value inspection is strict and wrapper-transparent") {
         &integer));
     CHECK_FALSE(slp_value_get_int(
         SLP_NUM_VAL(
-            (double)INT_MAX + 1.0),
+            static_cast<double>(
+                std::numeric_limits<int>::max()) +
+            1.0),
         &integer));
 
     slp_vm_free(vm);

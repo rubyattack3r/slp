@@ -175,7 +175,7 @@ test-amalgamation:
 	./tests/test_amalgamation.sh
 
 format-check: slp_fmt
-	find tests -name '*.sl' | grep -vE 'argerr.sl|errors1.sl|errors2.sl|errors3.sl|errors5.sl|hoeserror.sl|keyvalueerr.sl|noterm.sl|noterm2.sl|scalref.sl|sillysyntax.sl|warn.sl' | xargs -n1 ./bin/slp_fmt > /dev/null
+	find tests/fixtures tests/fixtures_vm -name '*.sl' | grep -vE 'argerr.sl|errors[1-5].sl|hoeserror.sl|keyvalueerr.sl|noterm.sl|noterm2.sl|scalref.sl|sillysyntax.sl|warn.sl' | xargs -n1 ./bin/slp_fmt > /dev/null
 
 # ---------------------------------------------------------------------------
 # Benchmarks
