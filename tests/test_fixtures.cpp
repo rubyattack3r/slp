@@ -24,7 +24,8 @@ static SlpAllocator fixture_allocator = {fixture_realloc, NULL};
 TEST_CASE("Parse all .sl fixtures and check error expectations") {
   const char *illformed[] = {
       "argerr.sl",  "errors1.sl",   "errors2.sl",     "errors3.sl",
-      "errors5.sl", "hoeserror.sl", "keyvalueerr.sl", "noterm.sl",
+      "errors4.sl", "errors5.sl",   "hoeserror.sl",   "keyvalueerr.sl",
+      "noterm.sl",
       "noterm2.sl", "scalref.sl",   "sillysyntax.sl", "warn.sl",
       NULL};
 

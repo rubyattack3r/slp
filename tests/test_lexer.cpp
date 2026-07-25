@@ -92,6 +92,26 @@ TEST_CASE("Lexer identifies strings, literals, and combinations of hex and "
   CHECK_EQ(token.type, SLP_TOKEN_EOF);
 }
 
+TEST_CASE("Lexer stops class literals before concatenated scalar values") {
+  const char *source =
+      "^java.lang.Character$Subset.$data";
+  SlpLexer lexer;
+  slp_lexer_init(&lexer, source, &test_allocator);
+
+  SlpToken token = slp_lexer_scan_token(&lexer);
+  CHECK_EQ(token.type, SLP_TOKEN_CLASS_LITERAL);
+  CHECK_EQ(
+      strncmp(
+          token.start, "^java.lang.Character$Subset",
+          token.length),
+      0);
+
+  token = slp_lexer_scan_token(&lexer);
+  CHECK_EQ(token.type, SLP_TOKEN_DOT);
+  token = slp_lexer_scan_token(&lexer);
+  CHECK_EQ(token.type, SLP_TOKEN_SCALAR);
+}
+
 TEST_CASE("Lexer reports an error token for an unterminated string") {
   const char *source = "\"no closing quote";
   SlpLexer lexer;
@@ -167,4 +187,3 @@ TEST_CASE("Lexer identifies ge and le as built-in binary predicates") {
   token = slp_lexer_scan_token(&lexer);
   CHECK_EQ(token.type, SLP_TOKEN_EOF);
 }
-

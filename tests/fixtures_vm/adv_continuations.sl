@@ -1,24 +1,18 @@
 # Comprehensive Continuation & Coroutine Integration Test
 
-# Part 1: Basic callcc and nested callcc
-$val1 = $null;
-$val2 = $null;
-
-sub test_nested_callcc {
+# Part 1: A resumed owner returns to its callcc handler
+sub test_returning_callcc {
     $x = callcc {
-        $c1 = $1;
-        $y = callcc {
-            $c2 = $1;
-            [$c1: "from_inner"];
-            assert 1 == 0 : "should not reach here";
-        };
-        return $y;
+        $continuation = $1;
+        $owner_result = [$continuation: "resumed"];
+        return "handler got " . $owner_result;
     };
-    return $x;
+    return "owner got " . $x;
 }
 
-$res = test_nested_callcc();
-assert $res eq "from_inner" : "Nested callcc returned " . $res;
+$res = test_returning_callcc();
+assert $res eq "handler got owner got resumed"
+    : "Returning callcc returned " . $res;
 
 # Part 2: Continuation inside loops
 # A continuation that resets or skips loop iterations
@@ -46,16 +40,17 @@ $jumped = 0;
 $l_res = loop_test();
 
 if ($jumped == 0) {
-    # First execution path
-    assert $l_res eq "normal";
-    assert $loop_count == 5 : "Loop count was " . $loop_count;
+    # Sleep callcc yields the handler's return value. The captured continuation
+    # resumes at the callcc expression when invoked below.
+    assert $l_res eq "initial";
+    assert $loop_count == 3 : "Loop count was " . $loop_count;
     
     $jumped = 1;
     [$loop_cont: "jumped"];
 } else {
-    # Second execution path (restored from continuation)
+    # The resumed callcc returns "jumped", so loop_test exits at iteration 2.
     assert $l_res eq "done_jump";
-    assert $loop_count == 5 : "Loop count after jump was " . $loop_count;
+    assert $loop_count == 3 : "Loop count after jump was " . $loop_count;
 }
 
 # Part 3: Coroutines and state persistence

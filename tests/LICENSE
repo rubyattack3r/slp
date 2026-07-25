@@ -1,6 +1,9 @@
 Test Suite License and Attribution
 
-The test fixtures and regression tests included in this directory (including `tests/fixtures/` and `tests/fixtures_vm/`) are derived or copied directly from the reference implementation of the Sleep programming language (jsleep).
+The test fixtures and regression tests included in this directory (including
+`tests/fixtures/`, `tests/fixtures_vm/`, and `tests/reference_output/`) are
+derived or copied directly from the reference implementation of the Sleep
+programming language (jsleep).
 
 * **Original Author**: Raphael Mudge
 * **Original Project URI**: https://sleep.dashnine.org/

@@ -215,6 +215,31 @@ TEST_CASE("GC: rooted array and its elements survive collection") {
     slp_vm_free(vm);
 }
 
+TEST_CASE("GC: portable Java object payload survives collection") {
+    SlpVM *vm = slp_vm_new(&gc_allocator);
+    REQUIRE(vm != nullptr);
+
+    SlpObjJavaObject *object =
+        slp_vm_new_java_object(
+            vm, "[B", SLP_JAVA_GENERIC);
+    REQUIRE(object != nullptr);
+    SlpObjString *payload =
+        slp_vm_copy_cstr(vm, "payload");
+    object->value = SLP_OBJ_VAL(payload);
+    slp_vm_push(vm, SLP_OBJ_VAL(object));
+
+    slp_gc_collect(vm);
+
+    SlpObjJavaObject *survivor =
+        SLP_AS_JAVA_OBJECT(slp_vm_peek(vm, 0));
+    REQUIRE(SLP_IS_OBJ(survivor->value));
+    CHECK(SLP_AS_STRING(survivor->value) == payload);
+    CHECK(strcmp(
+        SLP_AS_STRING(survivor->value)->chars,
+        "payload") == 0);
+    slp_vm_free(vm);
+}
+
 TEST_CASE("GC: collection actually triggers during execution and bounds memory") {
     SlpVM *vm = slp_vm_new(&gc_allocator);
     // Allocate well over the post-collection floor so the safepoint collector

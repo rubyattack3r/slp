@@ -2,6 +2,7 @@
 #include "slp_ast.h"
 #include "slp_utils.h"
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,6 +25,9 @@ static SlpASTNode *declaration(SlpParser *parser);
 static SlpASTNode *block(SlpParser *parser);
 static SlpASTNode **parse_args(SlpParser *parser, size_t *count,
                                   SlpTokenType endToken);
+static SlpASTNode *bridge(
+    SlpParser *parser, SlpASTNode *left,
+    bool canAssign);
 
 typedef enum {
   PREC_NONE,
@@ -76,6 +80,7 @@ void slp_parser_init(SlpParser *parser, const char *source,
   parser->current = parser->previous;
   parser->error_line = 0;
   parser->error_message = NULL;
+  parser->error_buffer[0] = '\0';
   parser->depth = 0;
 }
 
@@ -159,6 +164,7 @@ static SlpASTNode *binary(SlpParser *parser, SlpASTNode *left,
   SlpASTNode *right =
       parse_precedence(parser, (ParsePrecedence)(rule->precedence + 1));
   SlpASTNode *node = allocate_node(parser, SLP_AST_BINOP);
+  node->line = operatorToken.line;
   node->as.binop.left = left;
   node->as.binop.op = operatorToken;
   node->as.binop.right = right;
@@ -173,6 +179,7 @@ static SlpASTNode *negated_binary(SlpParser *parser, SlpASTNode *left,
   SlpToken predicateToken = parser->previous;
   SlpASTNode *right = parse_precedence(parser, PREC_EQUALITY);
   SlpASTNode *node = allocate_node(parser, SLP_AST_BINOP);
+  node->line = predicateToken.line;
   node->as.binop.left = left;
   node->as.binop.op = predicateToken;
   node->as.binop.right = right;
@@ -187,6 +194,7 @@ static SlpASTNode *unary(SlpParser *parser, SlpASTNode *left,
   SlpToken operatorToken = parser->previous;
   SlpASTNode *operand = parse_precedence(parser, PREC_UNARY);
   SlpASTNode *node = allocate_node(parser, SLP_AST_UNARYOP);
+  node->line = operatorToken.line;
   node->as.unaryop.op = operatorToken;
   node->as.unaryop.operand = operand;
   node->as.unaryop.is_postfix = false;
@@ -199,6 +207,7 @@ static SlpASTNode *assignment(SlpParser *parser, SlpASTNode *left,
   SlpToken operatorToken = parser->previous;
   SlpASTNode *right = parse_precedence(parser, PREC_ASSIGNMENT);
   SlpASTNode *node = allocate_node(parser, SLP_AST_ASSIGNMENT);
+  node->line = operatorToken.line;
   node->as.assign.left = left;
   node->as.assign.op = operatorToken;
   node->as.assign.right = right;
@@ -215,6 +224,14 @@ static SlpASTNode *identifier(SlpParser *parser, SlpASTNode *left,
   return node;
 }
 
+static SlpASTNode *inline_prefix(
+    SlpParser *parser, SlpASTNode *left,
+    bool canAssign) {
+  if (check(parser, SLP_TOKEN_LEFT_PAREN))
+    return identifier(parser, left, canAssign);
+  return bridge(parser, left, canAssign);
+}
+
 static const char *copy_unquoted_lexeme(SlpParser *parser, SlpToken *token) {
     if (token->length < 2) return slp_lexer_copy_lexeme(&parser->lexer, token);
     size_t inner_len = token->length - 2;
@@ -225,14 +242,23 @@ static const char *copy_unquoted_lexeme(SlpParser *parser, SlpToken *token) {
     for (size_t ri = 0; ri < inner_len; ri++) {
         if (src[ri] == '\\' && ri + 1 < inner_len) {
             char next = src[ri + 1];
-            switch (next) {
-                case 'n': str[wi++] = '\n'; ri++; break;
-                case 't': str[wi++] = '\t'; ri++; break;
-                case 'r': str[wi++] = '\r'; ri++; break;
-                case '\\': str[wi++] = '\\'; ri++; break;
-                case '"': str[wi++] = '"'; ri++; break;
-                case '\'': str[wi++] = '\''; ri++; break;
-                default: str[wi++] = src[ri]; break;
+            if (token->type == SLP_TOKEN_LITERAL) {
+                if (next == '\'' || next == '\\') {
+                    str[wi++] = next;
+                    ri++;
+                } else {
+                    str[wi++] = src[ri];
+                }
+            } else {
+                switch (next) {
+                    case 'n': str[wi++] = '\n'; ri++; break;
+                    case 't': str[wi++] = '\t'; ri++; break;
+                    case 'r': str[wi++] = '\r'; ri++; break;
+                    case '\\': str[wi++] = '\\'; ri++; break;
+                    case '"': str[wi++] = '"'; ri++; break;
+                    case '\'': str[wi++] = '\''; ri++; break;
+                    default: str[wi++] = src[ri]; break;
+                }
             }
         } else {
             str[wi++] = src[ri];
@@ -251,7 +277,41 @@ static char *duplicate_string(SlpParser *parser, const char *src, size_t len) {
     return dest;
 }
 
-static SlpASTNode *parse_double_quoted_string(SlpParser *parser, SlpToken *token) {
+static bool parsed_string_var_end(char character) {
+    return character == ' ' || character == '\t' || character == '\n' ||
+           character == '$' || character == '\\';
+}
+
+static void free_parsed_string_parts(SlpParser *parser,
+                                     SlpASTNode **parts, int count) {
+    for (int i = 0; i < count; i++)
+        slp_parser_free_node(parts[i], parser->allocator);
+}
+
+static SlpASTNode *parse_alignment_width(SlpParser *parser,
+                                         const char *start, size_t length,
+                                         char **owned_source) {
+    char *source = duplicate_string(parser, start, length);
+    if (!source) return NULL;
+
+    SlpParser nested;
+    slp_parser_init(&nested, source, parser->allocator);
+    advance(&nested);
+    SlpASTNode *width = expression(&nested);
+    if (nested.had_error || !width || !check(&nested, SLP_TOKEN_EOF)) {
+        if (width) slp_parser_free_node(width, parser->allocator);
+        parser->allocator->reallocate(source, 0,
+                                      parser->allocator->user_data);
+        error(parser, nested.error_message ? nested.error_message
+                                           : "Invalid alignment expression.");
+        return NULL;
+    }
+    *owned_source = source;
+    return width;
+}
+
+static SlpASTNode *parse_double_quoted_string(SlpParser *parser,
+                                              SlpToken *token) {
     if (token->length < 2) {
         SlpASTNode *node = allocate_node(parser, SLP_AST_STRING);
         node->as.string_val = duplicate_string(parser, "", 0);
@@ -261,134 +321,168 @@ static SlpASTNode *parse_double_quoted_string(SlpParser *parser, SlpToken *token
     const char *src = token->start + 1;
     size_t inner_len = token->length - 2;
     const char *end = src + inner_len;
-
-    char *lit_buf = (char *)parser->allocator->reallocate(NULL, inner_len + 1, parser->allocator->user_data);
-    if (!lit_buf) return NULL;
-    size_t lit_len = 0;
+    char *literal = (char *)parser->allocator->reallocate(
+        NULL, inner_len + 1, parser->allocator->user_data);
+    if (!literal) return NULL;
+    size_t literal_length = 0;
 
     SlpASTNode *parts[512];
     int part_count = 0;
+    const char *cursor = src;
+    int cursor_line = token->line;
+    for (size_t i = 0; i < token->length; i++) {
+        if (token->start[i] == '\n')
+            cursor_line--;
+    }
+    int literal_line = cursor_line;
 
-    const char *p = src;
-    while (p < end) {
-        // Bound the fixed parts[] array: each iteration appends at most two
-        // segments and the post-loop flush one more, so stop well before 512.
+#define FLUSH_PARSED_LITERAL()                                                \
+    do {                                                                      \
+        if (literal_length > 0) {                                             \
+            SlpASTNode *literal_node =                                        \
+                allocate_node(parser, SLP_AST_STRING);                        \
+            literal_node->line = literal_line;                                \
+            literal_node->as.string_val =                                    \
+                duplicate_string(parser, literal, literal_length);            \
+            parts[part_count++] = literal_node;                               \
+            literal_length = 0;                                              \
+        }                                                                     \
+    } while (0)
+
+    while (cursor < end) {
         if (part_count >= 510) {
             error(parser, "String has too many interpolated segments.");
-            parser->allocator->reallocate(lit_buf, 0, parser->allocator->user_data);
-            for (int i = 0; i < part_count; i++) {
-                slp_parser_free_node(parts[i], parser->allocator);
-            }
+            parser->allocator->reallocate(literal, 0,
+                                          parser->allocator->user_data);
+            free_parsed_string_parts(parser, parts, part_count);
             return NULL;
         }
-        // 1. Backslash escapes
-        if (*p == '\\' && p + 1 < end) {
-            char next = p[1];
-            if (next == '$' || next == '@' || next == '%' || next == '\\' || next == '"' || next == '\'') {
-                lit_buf[lit_len++] = next;
-                p += 2;
+
+        if (*cursor == '\\' && cursor + 1 < end) {
+            char escaped = cursor[1];
+            if (escaped == 'n')
+                literal[literal_length++] = '\n';
+            else if (escaped == 't')
+                literal[literal_length++] = '\t';
+            else if (escaped == 'r')
+                literal[literal_length++] = '\r';
+            else
+                literal[literal_length++] = escaped;
+            if (escaped == '\n')
+                cursor_line++;
+            cursor += 2;
+            continue;
+        }
+
+        // Sleep's parsed-literal terminator is exactly " $+ ".
+        if (*cursor == ' ' && cursor + 3 < end &&
+            cursor[1] == '$' && cursor[2] == '+' && cursor[3] == ' ') {
+            cursor += 4;
+            continue;
+        }
+        if (*cursor == '$' && cursor + 1 < end && cursor[1] == '+') {
+            error(parser, "operator $+ must be surrounded with whitespace");
+            parser->allocator->reallocate(literal, 0,
+                                          parser->allocator->user_data);
+            free_parsed_string_parts(parser, parts, part_count);
+            return NULL;
+        }
+
+        if (*cursor == '$' && cursor + 1 < end &&
+            !parsed_string_var_end(cursor[1])) {
+            FLUSH_PARSED_LITERAL();
+            int value_line = cursor_line;
+            cursor++;
+
+            char *alignment_source = NULL;
+            SlpASTNode *width = NULL;
+            if (*cursor == '[') {
+                const char *width_start = ++cursor;
+                int depth = 1;
+                while (cursor < end && depth > 0) {
+                    if (*cursor == '[')
+                        depth++;
+                    else if (*cursor == ']')
+                        depth--;
+                    if (*cursor == '\n')
+                        cursor_line++;
+                    if (depth > 0) cursor++;
+                }
+                if (depth != 0) {
+                    error(parser, "missing close brace for variable alignment");
+                    parser->allocator->reallocate(
+                        literal, 0, parser->allocator->user_data);
+                    free_parsed_string_parts(parser, parts, part_count);
+                    return NULL;
+                }
+                if (cursor == width_start) {
+                    error(parser, "Empty alignment specification");
+                    parser->allocator->reallocate(
+                        literal, 0, parser->allocator->user_data);
+                    free_parsed_string_parts(parser, parts, part_count);
+                    return NULL;
+                }
+                width = parse_alignment_width(
+                    parser, width_start, (size_t)(cursor - width_start),
+                    &alignment_source);
+                if (!width) {
+                    parser->allocator->reallocate(
+                        literal, 0, parser->allocator->user_data);
+                    free_parsed_string_parts(parser, parts, part_count);
+                    return NULL;
+                }
+                cursor++;
+                if (cursor >= end || parsed_string_var_end(*cursor)) {
+                    slp_parser_free_node(width, parser->allocator);
+                    parser->allocator->reallocate(
+                        alignment_source, 0, parser->allocator->user_data);
+                    error(parser, "can not align an empty variable");
+                    parser->allocator->reallocate(
+                        literal, 0, parser->allocator->user_data);
+                    free_parsed_string_parts(parser, parts, part_count);
+                    return NULL;
+                }
+            }
+
+            const char *name_start = cursor;
+            while (cursor < end && !parsed_string_var_end(*cursor))
+                cursor++;
+            SlpASTNode *value = allocate_node(parser, SLP_AST_SCALAR);
+            value->line = value_line;
+            value->as.string_val = duplicate_string(
+                parser, name_start, (size_t)(cursor - name_start));
+
+            if (width) {
+                SlpASTNode *aligned = allocate_node(parser, SLP_AST_ALIGN);
+                aligned->line = value_line;
+                aligned->as.align.width = width;
+                aligned->as.align.value = value;
+                aligned->as.align.source = alignment_source;
+                parts[part_count++] = aligned;
             } else {
-                switch (next) {
-                    case 'n': lit_buf[lit_len++] = '\n'; break;
-                    case 't': lit_buf[lit_len++] = '\t'; break;
-                    case 'r': lit_buf[lit_len++] = '\r'; break;
-                    default: lit_buf[lit_len++] = '\\'; lit_buf[lit_len++] = next; break;
-                }
-                p += 2;
+                parts[part_count++] = value;
             }
+            literal_line = cursor_line;
             continue;
         }
 
-        // 2. $+ operator (strip preceding/succeeding spaces)
-        if (*p == '$' && p + 1 < end && p[1] == '+') {
-            // Strip trailing spaces from our collected literal buffer
-            while (lit_len > 0 && (lit_buf[lit_len - 1] == ' ' || lit_buf[lit_len - 1] == '\t')) {
-                lit_len--;
-            }
-            // Flush literal buffer if not empty
-            if (lit_len > 0) {
-                lit_buf[lit_len] = '\0';
-                SlpASTNode *node = allocate_node(parser, SLP_AST_STRING);
-                node->as.string_val = duplicate_string(parser, lit_buf, lit_len);
-                parts[part_count++] = node;
-                lit_len = 0;
-            }
-
-            p += 2; // skip $+
-
-            // Skip leading spaces/tabs after $+
-            while (p < end && (*p == ' ' || *p == '\t')) {
-                p++;
-            }
-            continue;
-        }
-
-        // 3. Variable interpolation
-        if ((*p == '$' || *p == '@' || *p == '%') && p + 1 < end) {
-            char sigil = *p;
-            const char *var_start = p + 1;
-            const char *var_p = var_start;
-            while (var_p < end && ((*var_p >= 'a' && *var_p <= 'z') ||
-                                   (*var_p >= 'A' && *var_p <= 'Z') ||
-                                   (*var_p >= '0' && *var_p <= '9') ||
-                                   *var_p == '_')) {
-                var_p++;
-            }
-            if (var_p > var_start) {
-                // We have a valid variable name!
-                // First flush the literal buffer collected so far
-                if (lit_len > 0) {
-                    lit_buf[lit_len] = '\0';
-                    SlpASTNode *node = allocate_node(parser, SLP_AST_STRING);
-                    node->as.string_val = duplicate_string(parser, lit_buf, lit_len);
-                    parts[part_count++] = node;
-                    lit_len = 0;
-                }
-
-                // Create the variable AST node
-                size_t var_name_len = var_p - var_start;
-                char *var_name = duplicate_string(parser, var_start, var_name_len);
-
-                SlpASTNode *node = NULL;
-                if (sigil == '$') {
-                    node = allocate_node(parser, SLP_AST_SCALAR);
-                } else if (sigil == '@') {
-                    node = allocate_node(parser, SLP_AST_ARRAY);
-                } else {
-                    node = allocate_node(parser, SLP_AST_HASHTABLE);
-                }
-                node->as.string_val = var_name;
-                parts[part_count++] = node;
-
-                p = var_p;
-                continue;
-            }
-        }
-
-        // 4. Regular character
-        lit_buf[lit_len++] = *p;
-        p++;
+        if (*cursor == '\n')
+            cursor_line++;
+        literal[literal_length++] = *cursor++;
     }
 
-    // Flush any remaining literal characters
-    if (lit_len > 0) {
-        lit_buf[lit_len] = '\0';
-        SlpASTNode *node = allocate_node(parser, SLP_AST_STRING);
-        node->as.string_val = duplicate_string(parser, lit_buf, lit_len);
-        parts[part_count++] = node;
-    }
+    FLUSH_PARSED_LITERAL();
+#undef FLUSH_PARSED_LITERAL
 
-    parser->allocator->reallocate(lit_buf, 0, parser->allocator->user_data);
-
-    // Build the tree of concatenations
+    parser->allocator->reallocate(literal, 0,
+                                  parser->allocator->user_data);
     if (part_count == 0) {
         SlpASTNode *node = allocate_node(parser, SLP_AST_STRING);
         node->as.string_val = duplicate_string(parser, "", 0);
         return node;
     }
-    if (part_count == 1) {
+    if (part_count == 1)
         return parts[0];
-    }
 
     SlpASTNode *result = parts[0];
     for (int i = 1; i < part_count; i++) {
@@ -398,8 +492,9 @@ static SlpASTNode *parse_double_quoted_string(SlpParser *parser, SlpToken *token
         binop->as.binop.op.type = SLP_TOKEN_DOT;
         binop->as.binop.op.start = ".";
         binop->as.binop.op.length = 1;
-        binop->as.binop.op.line = token->line;
+        binop->as.binop.op.line = parts[i]->line;
         binop->as.binop.negate = false;
+        binop->line = parts[i]->line;
         result = binop;
     }
     return result;
@@ -427,12 +522,18 @@ static SlpASTNode *number(SlpParser *parser, SlpASTNode *left,
 
   if (token.type == SLP_TOKEN_LONG) {
     SlpASTNode *node = allocate_node(parser, SLP_AST_LONG);
-    node->as.long_val = (long)strtoll(lexeme, NULL, 10);
+    node->as.long_val = (int64_t)strtoll(lexeme, NULL, 0);
     parser->allocator->reallocate((void *)lexeme, 0, parser->allocator->user_data);
     return node;
   } else {
     SlpASTNode *node = allocate_node(parser, SLP_AST_NUMBER);
-    node->as.double_val = strtod(lexeme, NULL);
+    node->number_is_double = token.type == SLP_TOKEN_DOUBLE;
+    if (!node->number_is_double &&
+        ((lexeme[0] == '0' && (lexeme[1] == 'x' || lexeme[1] == 'X')) ||
+         (lexeme[0] == '0' && lexeme[1] >= '0' && lexeme[1] <= '9')))
+      node->as.double_val = (double)strtoll(lexeme, NULL, 0);
+    else
+      node->as.double_val = strtod(lexeme, NULL);
     parser->allocator->reallocate((void *)lexeme, 0, parser->allocator->user_data);
     return node;
   }
@@ -558,6 +659,33 @@ static SlpASTNode *grouping(SlpParser *parser, SlpASTNode *left,
     return node;
   }
   consume(parser, SLP_TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
+  bool followed_by_assignment =
+      check(parser, SLP_TOKEN_EQUAL) ||
+      check(parser, SLP_TOKEN_ANDEQUAL) ||
+      check(parser, SLP_TOKEN_CATEQUAL) ||
+      check(parser, SLP_TOKEN_DIVEQUAL) ||
+      check(parser, SLP_TOKEN_LSHIFTEQUAL) ||
+      check(parser, SLP_TOKEN_MINUSEQUAL) ||
+      check(parser, SLP_TOKEN_OREQUAL) ||
+      check(parser, SLP_TOKEN_PLUSEQUAL) ||
+      check(parser, SLP_TOKEN_RSHIFTEQUAL) ||
+      check(parser, SLP_TOKEN_TIMESEQUAL) ||
+      check(parser, SLP_TOKEN_XOREQUAL) ||
+      check(parser, SLP_TOKEN_EXPEQUAL);
+  if (followed_by_assignment &&
+      (expr->type == SLP_AST_SCALAR || expr->type == SLP_AST_ARRAY ||
+       expr->type == SLP_AST_HASHTABLE ||
+       expr->type == SLP_AST_IDENTIFIER)) {
+    SlpASTNode *node = allocate_node(parser, SLP_AST_LVALUE_TUPLE);
+    node->as.block.capacity = 1;
+    node->as.block.count = 1;
+    node->as.block.statements =
+        (SlpASTNode **)parser->allocator->reallocate(
+            NULL, sizeof(SlpASTNode *), parser->allocator->user_data);
+    if (node->as.block.statements)
+      node->as.block.statements[0] = expr;
+    return node;
+  }
   return expr;
 }
 
@@ -597,12 +725,79 @@ static SlpASTNode *index_acc(SlpParser *parser, SlpASTNode *left,
   return node;
 }
 
+static bool object_target_starts_qualified_name(
+    SlpParser *parser) {
+  if (!check(parser, SLP_TOKEN_ID))
+    return false;
+  const char *saved_current =
+      parser->lexer.current;
+  int saved_line = parser->lexer.line;
+  int saved_start_line =
+      parser->lexer.start_line;
+  SlpToken next =
+      slp_lexer_scan_token(&parser->lexer);
+  parser->lexer.current = saved_current;
+  parser->lexer.line = saved_line;
+  parser->lexer.start_line =
+      saved_start_line;
+  return next.type == SLP_TOKEN_DOT;
+}
+
+static SlpASTNode *qualified_object_target(
+    SlpParser *parser) {
+  char qualified[512];
+  size_t length = 0;
+  qualified[0] = '\0';
+
+  do {
+    consume(
+        parser, SLP_TOKEN_ID,
+        "Expect class name component after '.'.");
+    SlpToken component = parser->previous;
+    if (length > 0 &&
+        length + 1 < sizeof(qualified))
+      qualified[length++] = '.';
+    if (length + component.length >=
+        sizeof(qualified)) {
+      error(
+          parser,
+          "Qualified class name is too long.");
+      break;
+    }
+    memcpy(
+        qualified + length,
+        component.start,
+        component.length);
+    length += component.length;
+    qualified[length] = '\0';
+  } while (match(parser, SLP_TOKEN_DOT));
+
+  SlpASTNode *target =
+      allocate_node(
+          parser, SLP_AST_CLASS_LITERAL);
+  char *stored =
+      (char*)parser->allocator->reallocate(
+          NULL, length + 1,
+          parser->allocator->user_data);
+  if (!stored) {
+    error(parser, "Out of memory.");
+    target->as.string_val = NULL;
+    return target;
+  }
+  memcpy(stored, qualified, length + 1);
+  target->as.string_val = stored;
+  return target;
+}
+
 static SlpASTNode *obj_expr(SlpParser *parser, SlpASTNode *left,
                                bool canAssign) {
   (void)canAssign;
   (void)left;
   SlpASTNode *node = allocate_node(parser, SLP_AST_OBJ_EXPR);
-  node->as.obj_expr.target = expression(parser);
+  node->as.obj_expr.target =
+      object_target_starts_qualified_name(parser)
+          ? qualified_object_target(parser)
+          : expression(parser);
   extern SlpASTNode **parse_args(SlpParser * parser, size_t *count,
                                     SlpTokenType endToken);
   if (match(parser, SLP_TOKEN_COLON)) {
@@ -713,10 +908,12 @@ static SlpASTNode *command(SlpParser *parser, SlpASTNode *left,
 
   SlpASTNode *node = allocate_node(parser, type);
   node->as.control.value = NULL;
+  node->as.control.message = NULL;
 
   bool allow_argument = true;
   if (op.type == SLP_TOKEN_RETURN || op.type == SLP_TOKEN_YIELD) {
-    if (parser->current.line > parser->previous.line) {
+    if (parser->lexer.start_line >
+        parser->previous.line) {
       allow_argument = false;
     }
   }
@@ -731,12 +928,9 @@ static SlpASTNode *command(SlpParser *parser, SlpASTNode *left,
       node->as.control.value = expression(parser);
       // Check for optional : "message"
       if (match(parser, SLP_TOKEN_COLON)) {
-        // The message is parsed as part of the expression - for now just
-        // consume it In a full implementation, we'd store this separately
         if (!check(parser, SLP_TOKEN_SEMICOLON) &&
             !check(parser, SLP_TOKEN_EOF)) {
-          SlpASTNode *msg = expression(parser); // Parse but discard the message for now
-          if (msg) slp_parser_free_node(msg, parser->allocator);
+          node->as.control.message = expression(parser);
         }
       }
     }
@@ -942,7 +1136,7 @@ ParseRule rules[] = {
     [SLP_TOKEN_YIELD] = {command, NULL, PREC_NONE},
     [SLP_TOKEN_CALLCC] = {command, NULL, PREC_NONE},
     [SLP_TOKEN_SUB] = {bridge, NULL, PREC_NONE},
-    [SLP_TOKEN_INLINE] = {bridge, NULL, PREC_NONE},
+    [SLP_TOKEN_INLINE] = {inline_prefix, NULL, PREC_NONE},
     [SLP_TOKEN_LOCAL] = {command, NULL, PREC_NONE},
     [SLP_TOKEN_THIS] = {command, NULL, PREC_NONE},
     [SLP_TOKEN_INC] = {unary, postfix, PREC_INCDEC},
@@ -1035,15 +1229,9 @@ static SlpASTNode *expression(SlpParser *parser) {
 
 static SlpASTNode *expression_statement(SlpParser *parser) {
   SlpASTNode *expr = expression(parser);
-  if (match(parser, SLP_TOKEN_SEMICOLON)) {
-    // Semicolon matched and consumed
-  } else if (check(parser, SLP_TOKEN_RIGHT_BRACE) || check(parser, SLP_TOKEN_EOF)) {
-    // Semicolon optional before closing brace or EOF
-  } else if (parser->current.line > parser->previous.line) {
-    // Newline acts as statement separator
-  } else {
-    consume(parser, SLP_TOKEN_SEMICOLON, "Expect ';' after statement.");
-  }
+  if (!match(parser, SLP_TOKEN_SEMICOLON) &&
+      !check(parser, SLP_TOKEN_EOF))
+    error(parser, "Missing terminator");
   return expr;
 }
 
@@ -1061,6 +1249,7 @@ static SlpASTNode *if_statement(SlpParser *parser) {
 }
 
 static SlpASTNode *while_statement(SlpParser *parser) {
+  int statement_line = parser->previous.line;
   SlpASTNode *assign_var = NULL;
   if (match(parser, SLP_TOKEN_SCALAR))
     assign_var = scalar(parser, NULL, false);
@@ -1070,6 +1259,7 @@ static SlpASTNode *while_statement(SlpParser *parser) {
   SlpASTNode *body = block(parser);
   if (assign_var) {
     SlpASTNode *node = allocate_node(parser, SLP_AST_ASSIGN_LOOP);
+    node->line = statement_line;
     node->as.assign_loop.value = assign_var->as.string_val;
     // We transferred ownership of the string to assign_loop, so we
     // manually free the scalar node but not the string it holds.
@@ -1080,6 +1270,7 @@ static SlpASTNode *while_statement(SlpParser *parser) {
     return node;
   }
   SlpASTNode *node = allocate_node(parser, SLP_AST_WHILE);
+  node->line = statement_line;
   node->as.while_stmt.condition = condition;
   node->as.while_stmt.body = body;
   return node;
@@ -1161,6 +1352,7 @@ static SlpASTNode *for_statement(SlpParser *parser) {
 }
 
 static SlpASTNode *foreach_statement(SlpParser *parser) {
+  int statement_line = parser->previous.line;
   SlpASTNode *key_node = NULL, *val_node = NULL;
   if (check(parser, SLP_TOKEN_SCALAR) || check(parser, SLP_TOKEN_PERCENT) || check(parser, SLP_TOKEN_AT)) {
     advance(parser);
@@ -1181,6 +1373,7 @@ static SlpASTNode *foreach_statement(SlpParser *parser) {
   consume(parser, SLP_TOKEN_RIGHT_PAREN, "Expect ')' after collection.");
   SlpASTNode *body = block(parser);
   SlpASTNode *node = allocate_node(parser, SLP_AST_FOREACH);
+  node->line = statement_line;
   node->as.foreach.index = (key_node) ? key_node->as.string_val : NULL;
 
   if (val_node) {
@@ -1313,8 +1506,29 @@ static SlpASTNode *import_statement(SlpParser *parser) {
 }
 
 static SlpASTNode *declaration(SlpParser *parser) {
-  if (match(parser, SLP_TOKEN_SUB) || match(parser, SLP_TOKEN_INLINE)) {
+  if (match(parser, SLP_TOKEN_SUB)) {
     return bridge(parser, NULL, false);
+  }
+  if (check(parser, SLP_TOKEN_INLINE)) {
+    const char *saved_current =
+        parser->lexer.current;
+    int saved_line = parser->lexer.line;
+    int saved_start_line =
+        parser->lexer.start_line;
+    SlpToken next =
+        slp_lexer_scan_token(
+            &parser->lexer);
+    parser->lexer.current =
+        saved_current;
+    parser->lexer.line = saved_line;
+    parser->lexer.start_line =
+        saved_start_line;
+    if (next.type !=
+        SLP_TOKEN_LEFT_PAREN) {
+      advance(parser);
+      return bridge(
+          parser, NULL, false);
+    }
   }
   if (match(parser, SLP_TOKEN_IMPORT)) {
     return import_statement(parser);
@@ -1417,8 +1631,38 @@ SlpASTNode **parse_args(SlpParser *parser, size_t *count,
       args[(*count)++] = arg_node;
       if (check(parser, endToken))
         break;
-      // Consume comma if present. If not present, we allow continuation if not at end.
-      match(parser, SLP_TOKEN_COMMA);
+      if (!match(parser, SLP_TOKEN_COMMA)) {
+        const char *name = NULL;
+        if (arg_node->as.arg.name &&
+            (arg_node->as.arg.name->type ==
+                 SLP_AST_SCALAR ||
+             arg_node->as.arg.name->type ==
+                 SLP_AST_ARRAY ||
+             arg_node->as.arg.name->type ==
+                 SLP_AST_HASHTABLE ||
+             arg_node->as.arg.name->type ==
+                 SLP_AST_IDENTIFIER ||
+             arg_node->as.arg.name->type ==
+                 SLP_AST_STRING ||
+             arg_node->as.arg.name->type ==
+                 SLP_AST_LITERAL))
+          name =
+              arg_node->as.arg.name->as.string_val;
+        if (name) {
+          snprintf(
+              parser->error_buffer,
+              sizeof(parser->error_buffer),
+              "key/value pair specified for '%s', "
+              "did you forget a comma?",
+              name);
+          error(parser, parser->error_buffer);
+        } else {
+          error(
+              parser,
+              "Expect ',' between arguments");
+        }
+        break;
+      }
     } while (!parser->had_error);
   }
   return args;

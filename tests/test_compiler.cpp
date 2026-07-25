@@ -88,7 +88,8 @@ TEST_CASE("Compiler: addition") {
     SlpChunk *c = fn->chunk;
     CHECK(c->code[0] == OP_PUSH_CONST);
     CHECK(c->code[3] == OP_PUSH_CONST);
-    CHECK(c->code[6] == OP_ADD);
+    CHECK(c->code[6] == OP_SWAP);
+    CHECK(c->code[7] == OP_ADD);
     slp_vm_free(vm);
 }
 
@@ -165,9 +166,57 @@ TEST_CASE("Compiler: function call") {
     SlpChunk *c = fn->chunk;
     bool found_call = false;
     for (int i = 0; i < c->count; i++) {
-        if (c->code[i] == OP_CALL) { found_call = true; break; }
+        if (c->code[i] == OP_CALL ||
+            c->code[i] == OP_CALL_NAMED) {
+            found_call = true;
+            break;
+        }
     }
     CHECK(found_call);
+    slp_vm_free(vm);
+}
+
+TEST_CASE("Compiler: calls evaluate arguments in reverse and restore order") {
+    SlpVM *vm = slp_vm_new(&tc_allocator);
+    SlpObjFunction *fn = compile_source("foo(1, 2, 3);", vm);
+    REQUIRE(fn != nullptr);
+    SlpChunk *c = fn->chunk;
+
+    REQUIRE(c->constant_count >= 4);
+    CHECK(slp_value_as_number(c->constants[1]) == doctest::Approx(3));
+    CHECK(slp_value_as_number(c->constants[2]) == doctest::Approx(2));
+    CHECK(slp_value_as_number(c->constants[3]) == doctest::Approx(1));
+
+    bool found_reverse = false;
+    for (int i = 0; i + 1 < c->count; i++) {
+        if (c->code[i] == OP_REVERSE && c->code[i + 1] == 3) {
+            found_reverse = true;
+            break;
+        }
+    }
+    CHECK(found_reverse);
+    slp_vm_free(vm);
+}
+
+TEST_CASE("Compiler: predicate bridges evaluate operands left-to-right") {
+    SlpVM *vm = slp_vm_new(&tc_allocator);
+    SlpObjFunction *fn = compile_source("left() eq right();", vm);
+    REQUIRE(fn != nullptr);
+    SlpChunk *c = fn->chunk;
+
+    REQUIRE(c->constant_count >= 3);
+    CHECK(strcmp(SLP_AS_STRING(c->constants[0])->chars, "left") == 0);
+    CHECK(strcmp(SLP_AS_STRING(c->constants[1])->chars, "right") == 0);
+
+    bool found_predicate = false;
+    bool found_swap = false;
+    for (int i = 0; i < c->count; i++) {
+        found_predicate =
+            found_predicate || c->code[i] == OP_BINARY_PREDICATE;
+        found_swap = found_swap || c->code[i] == OP_SWAP;
+    }
+    CHECK(found_predicate);
+    CHECK_FALSE(found_swap);
     slp_vm_free(vm);
 }
 

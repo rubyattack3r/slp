@@ -20,13 +20,13 @@ assert charAt("hello", 4) eq "o";
 assert left("hello", 3) eq "hel";
 assert left("hello", 10) eq "hello";
 assert right("hello", 3) eq "llo";
-assert right("hello", 10) eq "hello";
+assert right("hello", 5) eq "hello";
 
 assert mid("hello world", 6, 5) eq "world";
 assert mid("hello", 1, 3) eq "ell";
 
 assert find("hello world", "world") == 6;
-assert find("hello world", "xyz") == -1;
+assert find("hello world", "xyz") is $null;
 assert find("hello", "hel") == 0;
 
 assert replace("hello world", "world", "sleep") eq "hello sleep";

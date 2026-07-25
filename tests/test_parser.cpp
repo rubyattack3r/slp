@@ -168,6 +168,26 @@ TEST_CASE("Parser parses basic double-quoted string correctly") {
   slp_parser_free_node(root, &test_allocator);
 }
 
+TEST_CASE("Parser preserves non-quote escapes in single-quoted literals") {
+  const char *source = "'line\\\\n\\\\t\\\\x41'";
+  SlpParser parser;
+  slp_parser_init(&parser, source, &test_allocator);
+
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_EQ(parser.had_error, false);
+  REQUIRE(root != NULL);
+  REQUIRE(root->type == SLP_AST_SCRIPT);
+  REQUIRE(root->as.block.count == 1);
+  SlpASTNode *expr = root->as.block.statements[0];
+
+  REQUIRE(expr->type == SLP_AST_STRING);
+  CHECK_EQ(
+      strcmp(expr->as.string_val, "line\\n\\t\\x41"),
+      0);
+
+  slp_parser_free_node(root, &test_allocator);
+}
+
 TEST_CASE("Parser desugars double-quoted string with variable correctly") {
   const char *source = "\"hello $name\"";
   SlpParser parser;
@@ -236,6 +256,39 @@ TEST_CASE("Parser desugars double-quoted string with inline concatenation correc
   slp_parser_free_node(root, &test_allocator);
 }
 
+TEST_CASE("Parser preserves qualified class names in object targets") {
+  const char *source =
+      "[java.lang.System out];";
+  SlpParser parser;
+  slp_parser_init(
+      &parser, source, &test_allocator);
+
+  SlpASTNode *root =
+      slp_parser_parse(&parser);
+  CHECK_EQ(parser.had_error, false);
+  REQUIRE(root != NULL);
+  REQUIRE(root->type == SLP_AST_SCRIPT);
+  REQUIRE(root->as.block.count == 1);
+  SlpASTNode *expression =
+      root->as.block.statements[0];
+  REQUIRE(expression->type ==
+          SLP_AST_OBJ_EXPR);
+  REQUIRE(expression->as.obj_expr.target !=
+          NULL);
+  CHECK_EQ(
+      expression->as.obj_expr.target->type,
+      SLP_AST_CLASS_LITERAL);
+  CHECK_EQ(
+      strcmp(
+          expression->as.obj_expr.target
+              ->as.string_val,
+          "java.lang.System"),
+      0);
+
+  slp_parser_free_node(
+      root, &test_allocator);
+}
+
 // ---------------------------------------------------------------------------
 // Recursion / size guards (Phase 1: Tier-1 safety)
 // ---------------------------------------------------------------------------
@@ -279,7 +332,7 @@ TEST_CASE("Parser: string with too many interpolations errors, no overflow") {
   if (root) slp_parser_free_node(root, &test_allocator);
 }
 
-TEST_CASE("Parser parses optional semicolons and newlines correctly") {
+TEST_CASE("Parser rejects newlines used as statement terminators") {
   const char *source = 
     "local('$a')\n"
     "$a = 1\n"
@@ -291,20 +344,30 @@ TEST_CASE("Parser parses optional semicolons and newlines correctly") {
   slp_parser_init(&parser, source, &test_allocator);
 
   SlpASTNode *root = slp_parser_parse(&parser);
-  CHECK_EQ(parser.had_error, false);
-  REQUIRE(root != NULL);
-  slp_parser_free_node(root, &test_allocator);
+  CHECK(parser.had_error);
+  REQUIRE(parser.error_message != nullptr);
+  CHECK_EQ(
+      strcmp(parser.error_message,
+             "Missing terminator"),
+      0);
+  if (root)
+    slp_parser_free_node(root, &test_allocator);
 }
 
-TEST_CASE("Parser parses optional commas in argument lists correctly") {
+TEST_CASE("Parser rejects omitted argument commas") {
   const char *source = "bof_pack($1, \"zz\", $2 $2);";
   SlpParser parser;
   slp_parser_init(&parser, source, &test_allocator);
 
   SlpASTNode *root = slp_parser_parse(&parser);
-  CHECK_EQ(parser.had_error, false);
-  REQUIRE(root != NULL);
-  slp_parser_free_node(root, &test_allocator);
+  CHECK(parser.had_error);
+  REQUIRE(parser.error_message != nullptr);
+  CHECK_EQ(
+      strcmp(parser.error_message,
+             "Expect ',' between arguments"),
+      0);
+  if (root)
+    slp_parser_free_node(root, &test_allocator);
 }
 
 TEST_CASE("Parser: parses ge and le built-in binary predicates correctly") {
@@ -355,46 +418,43 @@ TEST_CASE("Parser: parses foreach with percent and at loop variables") {
   slp_parser_free_node(root, &test_allocator);
 }
 
-TEST_CASE("Parser: parses comma-less function call arguments") {
+TEST_CASE("Parser: rejects comma-less function call arguments") {
   const char *source = "foo(1 2 3);";
   SlpParser parser;
   slp_parser_init(&parser, source, &test_allocator);
 
   SlpASTNode *root = slp_parser_parse(&parser);
-  CHECK_EQ(parser.had_error, false);
-  REQUIRE(root != NULL);
-  REQUIRE(root->type == SLP_AST_SCRIPT);
-  REQUIRE(root->as.block.count == 1);
+  CHECK(parser.had_error);
+  REQUIRE(parser.error_message != nullptr);
+  CHECK_EQ(
+      strcmp(parser.error_message,
+             "Expect ',' between arguments"),
+      0);
 
-  SlpASTNode *call = root->as.block.statements[0];
-  CHECK_EQ(call->type, SLP_AST_CALL);
-  CHECK_EQ(call->as.call.arg_count, 3);
-  CHECK_EQ(call->as.call.args[0]->type, SLP_AST_ARG);
-  CHECK_EQ(call->as.call.args[0]->as.arg.value->type, SLP_AST_NUMBER);
-  CHECK_EQ(call->as.call.args[1]->type, SLP_AST_ARG);
-  CHECK_EQ(call->as.call.args[1]->as.arg.value->type, SLP_AST_NUMBER);
-  CHECK_EQ(call->as.call.args[2]->type, SLP_AST_ARG);
-  CHECK_EQ(call->as.call.args[2]->as.arg.value->type, SLP_AST_NUMBER);
-
-  slp_parser_free_node(root, &test_allocator);
+  if (root)
+    slp_parser_free_node(root, &test_allocator);
 }
 
-TEST_CASE("Parser: optional semicolons via newlines") {
+TEST_CASE("Parser: newlines do not replace statement terminators") {
   const char *source = "$x = 5\n$y = 10\n";
   SlpParser parser;
   slp_parser_init(&parser, source, &test_allocator);
 
   SlpASTNode *root = slp_parser_parse(&parser);
-  CHECK_EQ(parser.had_error, false);
-  REQUIRE(root != NULL);
-  REQUIRE(root->type == SLP_AST_SCRIPT);
-  REQUIRE(root->as.block.count == 2);
+  CHECK(parser.had_error);
+  REQUIRE(parser.error_message != nullptr);
+  CHECK_EQ(
+      strcmp(parser.error_message,
+             "Missing terminator"),
+      0);
 
-  slp_parser_free_node(root, &test_allocator);
+  if (root)
+    slp_parser_free_node(root, &test_allocator);
 }
 
 TEST_CASE("Parser: return keyword on newline restricts argument consumption") {
-  const char *source = "sub test_ret {\nreturn\n$x = 5;\n}";
+  const char *source =
+      "sub test_ret {\nreturn\n;\n$x = 5;\n}";
   SlpParser parser;
   slp_parser_init(&parser, source, &test_allocator);
 
@@ -419,6 +479,3 @@ TEST_CASE("Parser: return keyword on newline restricts argument consumption") {
 
   slp_parser_free_node(root, &test_allocator);
 }
-
-
-

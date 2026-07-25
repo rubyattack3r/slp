@@ -365,12 +365,14 @@ void slp_lexer_init(SlpLexer *lexer, const char *source,
   lexer->start = source;
   lexer->current = source;
   lexer->line = 1;
+  lexer->start_line = 1;
   lexer->allocator = allocator;
 }
 
 SlpToken slp_lexer_scan_token(SlpLexer *lexer) {
   skip_whitespace(lexer);
   lexer->start = lexer->current;
+  lexer->start_line = lexer->line;
 
   if (is_at_end(lexer))
     return make_token(lexer, SLP_TOKEN_EOF);
@@ -479,10 +481,12 @@ SlpToken slp_lexer_scan_token(SlpLexer *lexer) {
       // Consume the class name part
       while (is_alpha(peek(lexer)) || is_digit(peek(lexer)) ||
              peek(lexer) == '_' || peek(lexer) == '$' || peek(lexer) == '.') {
-        // If the next char is '.' followed by a quote, stop - that's member
-        // access
+        // A dot followed by a value starts Sleep concatenation. It is not
+        // part of the Java class name.
         if (peek(lexer) == '.' &&
-            (peek_next(lexer) == '"' || peek_next(lexer) == '\''))
+            (peek_next(lexer) == '"' || peek_next(lexer) == '\'' ||
+             peek_next(lexer) == '$' || peek_next(lexer) == '@' ||
+             peek_next(lexer) == '%'))
           break;
         lexer_advance(lexer);
       }

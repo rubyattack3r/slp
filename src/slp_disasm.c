@@ -28,8 +28,12 @@ const char *slp_opcode_name(SlpOpcode op) {
     case OP_STORE_LOCAL: return "STORE_LOCAL";
     case OP_LOAD_GLOBAL: return "LOAD_GLOBAL";
     case OP_STORE_GLOBAL: return "STORE_GLOBAL";
+    case OP_STORE_CATCH: return "STORE_CATCH";
     case OP_LOAD_UPVALUE: return "LOAD_UPVALUE";
     case OP_STORE_UPVALUE: return "STORE_UPVALUE";
+    case OP_REFERENCE_LOCAL: return "REFERENCE_LOCAL";
+    case OP_REFERENCE_GLOBAL: return "REFERENCE_GLOBAL";
+    case OP_REFERENCE_UPVALUE: return "REFERENCE_UPVALUE";
     case OP_ADD:         return "ADD";
     case OP_SUBTRACT:    return "SUBTRACT";
     case OP_MULTIPLY:    return "MULTIPLY";
@@ -38,6 +42,7 @@ const char *slp_opcode_name(SlpOpcode op) {
     case OP_POWER:       return "POWER";
     case OP_NEGATE:      return "NEGATE";
     case OP_CONCAT:      return "CONCAT";
+    case OP_ALIGN:       return "ALIGN";
     case OP_REPEAT:      return "REPEAT";
     case OP_EQUAL:       return "EQUAL";
     case OP_NOT_EQUAL:   return "NOT_EQUAL";
@@ -64,19 +69,30 @@ const char *slp_opcode_name(SlpOpcode op) {
     case OP_NEGATED_BINARY_PREDICATE: return "NEGATED_BINARY_PREDICATE";
     case OP_POP:         return "POP";
     case OP_DUP:         return "DUP";
+    case OP_DUP2:        return "DUP2";
+    case OP_SWAP:        return "SWAP";
+    case OP_REVERSE:     return "REVERSE";
     case OP_JUMP:        return "JUMP";
     case OP_JUMP_IF_FALSE: return "JUMP_IF_FALSE";
     case OP_JUMP_IF_TRUE: return "JUMP_IF_TRUE";
+    case OP_JUMP_IF_NULL: return "JUMP_IF_NULL";
     case OP_LOOP:        return "LOOP";
     case OP_CALL:        return "CALL";
+    case OP_CALL_NAMED:  return "CALL_NAMED";
     case OP_RETURN:      return "RETURN";
+    case OP_INLINE_RETURN: return "INLINE_RETURN";
     case OP_CLOSURE:     return "CLOSURE";
     case OP_CLOSE_UPVALUE: return "CLOSE_UPVALUE";
     case OP_FOREACH_NEXT: return "FOREACH_NEXT";
+    case OP_FOREACH_NEXT_VALUE: return "FOREACH_NEXT_VALUE";
     case OP_BUILD_ARRAY: return "BUILD_ARRAY";
     case OP_BUILD_HASH:  return "BUILD_HASH";
+    case OP_BUILD_KEY_VALUE: return "BUILD_KEY_VALUE";
     case OP_INDEX_GET:   return "INDEX_GET";
+    case OP_INDEX_ENSURE: return "INDEX_ENSURE";
     case OP_INDEX_SET:   return "INDEX_SET";
+    case OP_TUPLE_GET:   return "TUPLE_GET";
+    case OP_TUPLE_COMPOUND: return "TUPLE_COMPOUND";
     case OP_OBJ_EXPR:    return "OBJ_EXPR";
     case OP_PUSH_HANDLER: return "PUSH_HANDLER";
     case OP_POP_HANDLER: return "POP_HANDLER";
@@ -113,8 +129,22 @@ static void print_value(SlpValue val, FILE *out) {
         case SLP_OBJ_STRING:
             fprintf(out, "\"%s\"", ((SlpObjString*)obj)->chars);
             break;
+        case SLP_OBJ_CLASS:
+            fprintf(out, "<%s %s>",
+                    ((SlpObjClass*)obj)->is_interface
+                        ? "interface" : "class",
+                    ((SlpObjClass*)obj)->name->chars);
+            break;
+        case SLP_OBJ_JAVA_OBJECT:
+            fprintf(
+                out, "<java %s>",
+                ((SlpObjJavaObject*)obj)->class_object->name->chars);
+            break;
         case SLP_OBJ_LONG:
             fprintf(out, "%ldL", (long)((SlpObjLong*)obj)->value);
+            break;
+        case SLP_OBJ_DOUBLE:
+            fprintf(out, "%.17g", ((SlpObjDouble*)obj)->value);
             break;
         case SLP_OBJ_FUNCTION:
             fprintf(out, "<fn %s>", ((SlpObjFunction*)obj)->name
@@ -143,19 +173,22 @@ static int is_short_instruction(uint8_t op) {
     case OP_STORE_LOCAL:
     case OP_LOAD_GLOBAL:
     case OP_STORE_GLOBAL:
+    case OP_STORE_CATCH:
     case OP_LOAD_UPVALUE:
     case OP_STORE_UPVALUE:
+    case OP_REFERENCE_GLOBAL:
     case OP_JUMP:
     case OP_JUMP_IF_FALSE:
     case OP_JUMP_IF_TRUE:
+    case OP_JUMP_IF_NULL:
     case OP_LOOP:
     case OP_AND:
     case OP_OR:
     case OP_PUSH_HANDLER:
     case OP_FOREACH_NEXT:
+    case OP_FOREACH_NEXT_VALUE:
     case OP_BUILD_ARRAY:
     case OP_BUILD_HASH:
-    case OP_OBJ_EXPR:
     case OP_BRIDGE_REGISTER:
     case OP_IMPORT:
     case OP_BACKTICK:
@@ -178,7 +211,9 @@ int slp_disasm_instruction(SlpChunk *chunk, int offset, FILE *out) {
     fprintf(out, "%-24s", name);
 
     if (instruction == OP_PUSH_CONST || instruction == OP_LOAD_GLOBAL ||
-        instruction == OP_STORE_GLOBAL) {
+        instruction == OP_STORE_GLOBAL ||
+        instruction == OP_STORE_CATCH ||
+        instruction == OP_REFERENCE_GLOBAL) {
         uint16_t idx = slp_chunk_read_short(chunk, offset + 1);
         fprintf(out, " %4d '", idx);
         if (idx < (uint16_t)chunk->constant_count)
@@ -190,7 +225,13 @@ int slp_disasm_instruction(SlpChunk *chunk, int offset, FILE *out) {
     }
 
     if (instruction == OP_LOAD_LOCAL || instruction == OP_STORE_LOCAL ||
-        instruction == OP_LOAD_UPVALUE || instruction == OP_STORE_UPVALUE) {
+        instruction == OP_LOAD_UPVALUE || instruction == OP_STORE_UPVALUE ||
+        instruction == OP_REFERENCE_LOCAL ||
+        instruction == OP_REFERENCE_UPVALUE ||
+        instruction == OP_INDEX_ENSURE ||
+        instruction == OP_REVERSE ||
+        instruction == OP_TUPLE_COMPOUND ||
+        instruction == OP_OBJ_EXPR) {
         // These ops carry a single-byte slot operand (the VM uses read_byte),
         // so read one byte and advance by two; reading a short here would
         // desync the entire disassembly stream.
@@ -202,7 +243,9 @@ int slp_disasm_instruction(SlpChunk *chunk, int offset, FILE *out) {
     if (is_short_instruction(instruction)) {
         uint16_t val = slp_chunk_read_short(chunk, offset + 1);
         if (instruction == OP_JUMP || instruction == OP_JUMP_IF_FALSE ||
-            instruction == OP_JUMP_IF_TRUE || instruction == OP_LOOP ||
+            instruction == OP_JUMP_IF_TRUE ||
+            instruction == OP_JUMP_IF_NULL ||
+            instruction == OP_LOOP ||
             instruction == OP_AND || instruction == OP_OR ||
             instruction == OP_PUSH_HANDLER) {
             int sign = (instruction == OP_LOOP) ? -1 : 1;
@@ -216,6 +259,18 @@ int slp_disasm_instruction(SlpChunk *chunk, int offset, FILE *out) {
     if (instruction == OP_CALL) {
         fprintf(out, " %4d", chunk->code[offset + 1]);
         return offset + 2;
+    }
+
+    if (instruction == OP_CALL_NAMED) {
+        uint8_t argc = chunk->code[offset + 1];
+        uint16_t idx = slp_chunk_read_short(chunk, offset + 2);
+        fprintf(out, " %4d %4d '", argc, idx);
+        if (idx < (uint16_t)chunk->constant_count)
+            print_value(chunk->constants[idx], out);
+        else
+            fprintf(out, "???");
+        fprintf(out, "'");
+        return offset + 4;
     }
 
     if (instruction == OP_CLOSURE) {

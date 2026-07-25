@@ -17,6 +17,7 @@ typedef enum {
   SLP_AST_LONG,
   SLP_AST_LITERAL,
   SLP_AST_STRING,
+  SLP_AST_ALIGN,
   SLP_AST_NUMBER,
   SLP_AST_SCALAR,
   SLP_AST_ARRAY,
@@ -60,12 +61,13 @@ typedef enum {
 struct SlpASTNode {
   SlpASTNodeType type;
   int line; // Line number for error reporting
+  bool number_is_double;
 
   // A simple discriminated union for node-specific data
   union {
     // Values and Literals
     bool boolean;
-    long long_val;
+    int64_t long_val;
     double double_val;
     const char *string_val; // Shared for string, literal, scalar, array,
                             // hashtable, ID, class.
@@ -84,6 +86,14 @@ struct SlpASTNode {
       struct SlpASTNode *right;
       bool negate;
     } binop;
+
+    // Aligned parsed-string fragment: $[width]name.
+    // source owns the token backing storage for the width expression.
+    struct {
+      struct SlpASTNode *width;
+      struct SlpASTNode *value;
+      char *source;
+    } align;
 
     // Unary Operation
     struct {
@@ -183,6 +193,7 @@ struct SlpASTNode {
     // Returns, Yields, Throws, Asserts
     struct {
       struct SlpASTNode *value;
+      struct SlpASTNode *message; // Optional assert failure message.
     } control;
 
     // Import
@@ -203,6 +214,7 @@ typedef struct {
   bool panic_mode;
   int error_line;
   const char *error_message;
+  char error_buffer[256];
   int depth; // recursion-depth guard against stack exhaustion on nested input
   SlpAllocator *allocator;
 } SlpParser;

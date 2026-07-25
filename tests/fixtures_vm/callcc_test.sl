@@ -1,23 +1,24 @@
-# callcc captures the continuation at the callcc expression.
-# Invoking the continuation restores the VM state and pushes the value,
-# then execution continues after the callcc expression.
+# callcc captures the continuation at the callcc expression. Invoking it
+# resumes the owner, and the owner's eventual return value comes back to the
+# callcc handler.
 sub foo {
    callcc {
        assert $1 ne $null : "continuation is null";
-       [$1: "returned"];
-       assert 1 == 0 : "this should not execute";
+       $owner_result = [$1: "returned"];
+       assert $owner_result eq "done"
+           : "owner returned " . $owner_result;
+       return "handler done";
    };
    return "done";
 }
 
 $val = foo();
-# The continuation restores to after callcc, so "done" is returned
-assert $val eq "done" : "value was " . $val;
+assert $val eq "handler done" : "value was " . $val;
 
 # Test that callcc result can be captured directly
 sub bar {
     $x = callcc {
-        [$1: 42];
+        return [$1: 42];
     };
     return $x;
 }

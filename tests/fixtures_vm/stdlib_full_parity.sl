@@ -38,7 +38,10 @@ assert @mapped[1] == 4;
 assert @mapped[2] == 6;
 
 sub is_even {
-    return $1 % 2 == 0;
+    if ($1 % 2 == 0) {
+        return $1;
+    }
+    return $null;
 }
 @filtered = filter(&is_even, @arr);
 assert size(@filtered) == 1;
@@ -52,15 +55,13 @@ assert $reduced == 6;
 
 # 4. Splicing & Array Utilities
 @a = @(1, 2, 3, 4);
-@removed = splice(@a, 1, 2, @(9, 10));
+@spliced = splice(@a, @(9, 10), 1, 2);
 assert size(@a) == 4;
 assert @a[0] == 1;
 assert @a[1] == 9;
 assert @a[2] == 10;
 assert @a[3] == 4;
-assert size(@removed) == 2;
-assert @removed[0] == 2;
-assert @removed[1] == 3;
+assert @spliced is @a;
 
 @sub = subarray(@a, 1, 3);
 assert size(@sub) == 2;
@@ -72,37 +73,41 @@ assert size(@sub2) == 2;
 assert @sub2[0] == 10;
 assert @sub2[1] == 4;
 
-@q = @();
-pushl(@q, 1);
-pushl(@q, 2);
-assert @q[0] == 2;
-assert @q[1] == 1;
-$p = popl(@q);
-assert $p == 2;
-assert @q[0] == 1;
+local('$scope_value');
+$scope_value = "outer";
+pushl($scope_value => "inner");
+assert $scope_value eq "inner";
+popl();
+assert $scope_value eq "outer";
 
 @src1 = @(1, 2);
 @src2 = @(3, 4);
-assert addAll(@src1, @src2) == true;
+@added = addAll(@src1, @src2);
+assert @added is @src1;
 assert size(@src1) == 4;
 assert @src1[2] == 3;
 
 @src3 = @(1, 2, 3, 4);
 @to_remove = @(2, 4);
-assert removeAll(@src3, @to_remove) == true;
+@removed = removeAll(@src3, @to_remove);
+assert @removed is @src3;
 assert size(@src3) == 2;
 assert @src3[0] == 1;
 assert @src3[1] == 3;
 
 @src4 = @(1, 2, 3, 4);
 @to_retain = @(2, 4, 5);
-assert retainAll(@src4, @to_retain) == true;
+@retained = retainAll(@src4, @to_retain);
+assert @retained is @src4;
 assert size(@src4) == 2;
 assert @src4[0] == 2;
 assert @src4[1] == 4;
 
 sub find_three {
-    return $1 == 3;
+    if ($1 == 3) {
+        return $1;
+    }
+    return $null;
 }
 $found = search(@(1, 2, 3, 4), &find_three);
 assert $found == 3;
@@ -133,7 +138,7 @@ assert $h2 isa "io_handle";
 assert !(-eof $h2);
 $line = readln($h2);
 assert $line == "Hello Parity World";
-assert available($h2) == 1;
+assert available($h2) == 0;
 closef($h2);
 deleteFile("temp_parity_test.txt");
 

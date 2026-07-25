@@ -108,6 +108,7 @@ int main(int argc, char **argv) {
             } else {
                 source = strdup(argv[start]);
             }
+            slp_vm_set_source_name(vm, "<eval>");
             start++;
         } else if (start < argc) {
             if (strcmp(argv[start], "-") == 0) {
@@ -123,8 +124,10 @@ int main(int argc, char **argv) {
                     source[len++] = (char)c;
                 }
                 source[len] = '\0';
+                slp_vm_set_source_name(vm, "<stdin>");
                 start++;
             } else {
+                slp_vm_set_source_name(vm, argv[start]);
                 source = utils_read_file(argv[start], NULL);
                 if (!source) {
                     fprintf(stderr, "Could not open file: %s\n", argv[start]);
@@ -136,7 +139,8 @@ int main(int argc, char **argv) {
         }
 
         if (source) {
-            // Populate @args in globals
+            // Sleep exposes script arguments through @ARGV. Keep @args as a
+            // compatibility alias for earlier SLP releases.
             SlpObjArray *args_arr = slp_vm_new_array(vm);
             for (int x = start; x < argc; x++) {
                 SlpObjString *arg_str = slp_vm_copy_cstr(vm, argv[x]);
@@ -144,6 +148,12 @@ int main(int argc, char **argv) {
             }
             SlpObjString *args_name = slp_vm_copy_string(vm, "@args", 5);
             slp_obj_hash_set(vm->allocator, vm->globals, SLP_OBJ_VAL(args_name), SLP_OBJ_VAL(args_arr));
+            SlpObjString *argv_name =
+                slp_vm_copy_string(vm, "@ARGV", 5);
+            slp_obj_hash_set(
+                vm->allocator, vm->globals,
+                SLP_OBJ_VAL(argv_name),
+                SLP_OBJ_VAL(args_arr));
 
             if (check) {
                 SlpParser parser;

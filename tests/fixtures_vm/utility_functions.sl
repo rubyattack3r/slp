@@ -1,12 +1,13 @@
 # Test utility functions
-assert typeOf(42) eq "number";
-assert typeOf("hello") eq "string";
-assert typeOf(true) eq "boolean";
-assert typeOf($null) eq "null";
-assert typeOf(@(1)) eq "array";
-assert typeOf(%(a => 1)) eq "hash";
+assert typeOf(42) is ^sleep.engine.types.IntValue;
+assert typeOf("hello") is ^sleep.engine.types.StringValue;
+assert typeOf(true) is ^sleep.engine.types.IntValue;
+assert typeOf(false) is ^sleep.engine.types.NullValue;
+assert typeOf($null) is ^sleep.engine.types.NullValue;
+assert typeOf(@(1)) is ^sleep.engine.types.ListContainer;
+assert typeOf(%(a => 1)) is ^sleep.engine.types.HashContainer;
 sub func { }
-assert typeOf(&func) eq "function";
+assert typeOf(&func) is ^sleep.engine.types.ObjectValue;
 
 # byteAt
 assert byteAt("ABC", 0) == 65;

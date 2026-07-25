@@ -17,7 +17,7 @@ void slp_ast_free_children(SlpASTNode **children,
 const char *slp_ast_get_string(SlpASTNode *node);
 const char *slp_ast_get_op(SlpASTNode *node);
 size_t slp_ast_get_op_length(SlpASTNode *node);
-long slp_ast_get_long(SlpASTNode *node);
+int64_t slp_ast_get_long(SlpASTNode *node);
 double slp_ast_get_double(SlpASTNode *node);
 bool slp_ast_get_bool(SlpASTNode *node);
 
@@ -37,7 +37,7 @@ SlpASTNode *slp_ast_build_node(SlpASTNodeType type, int line,
                                      SlpAllocator *allocator);
 void slp_ast_set_string_val(SlpASTNode *node, const char *str,
                                SlpAllocator *allocator);
-void slp_ast_set_long_val(SlpASTNode *node, long val);
+void slp_ast_set_long_val(SlpASTNode *node, int64_t val);
 void slp_ast_set_double_val(SlpASTNode *node, double val);
 void slp_ast_set_bool_val(SlpASTNode *node, bool val);
 

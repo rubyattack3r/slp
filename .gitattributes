@@ -1,0 +1,2 @@
+# Reference outputs are byte-for-byte test oracles. Their whitespace is data.
+tests/reference_output/** -whitespace

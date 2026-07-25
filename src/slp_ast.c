@@ -181,6 +181,15 @@ void slp_ast_get_children(SlpASTNode *node, SlpASTNode ***out_children,
     *out_count = 2;
     break;
   }
+  case SLP_AST_ALIGN: {
+    SlpASTNode **children = (SlpASTNode **)allocator->reallocate(
+        NULL, 2 * sizeof(SlpASTNode *), allocator->user_data);
+    children[0] = node->as.align.width;
+    children[1] = node->as.align.value;
+    *out_children = children;
+    *out_count = 2;
+    break;
+  }
   case SLP_AST_ASSIGNMENT: {
     SlpASTNode **children = (SlpASTNode **)allocator->reallocate(
         NULL, 2 * sizeof(SlpASTNode *), allocator->user_data);
@@ -304,12 +313,19 @@ void slp_ast_get_children(SlpASTNode *node, SlpASTNode ***out_children,
   case SLP_AST_YIELD:
   case SLP_AST_LOCAL:
   case SLP_AST_THIS: {
-    if (node->as.control.value) {
+    if (node->as.control.value || node->as.control.message) {
+      size_t count =
+          (node->as.control.value ? 1u : 0u) +
+          (node->as.control.message ? 1u : 0u);
       SlpASTNode **children = (SlpASTNode **)allocator->reallocate(
-          NULL, 1 * sizeof(SlpASTNode *), allocator->user_data);
-      children[0] = node->as.control.value;
+          NULL, count * sizeof(SlpASTNode *), allocator->user_data);
+      size_t index = 0;
+      if (node->as.control.value)
+        children[index++] = node->as.control.value;
+      if (node->as.control.message)
+        children[index++] = node->as.control.message;
       *out_children = children;
-      *out_count = 1;
+      *out_count = count;
     }
     break;
   }
@@ -432,7 +448,7 @@ size_t slp_ast_get_op_length(SlpASTNode *node) {
   }
 }
 
-long slp_ast_get_long(SlpASTNode *node) {
+int64_t slp_ast_get_long(SlpASTNode *node) {
   return (node && node->type == SLP_AST_LONG) ? node->as.long_val : 0;
 }
 
@@ -534,7 +550,7 @@ void slp_ast_set_string_val(SlpASTNode *node, const char *str,
   }
 }
 
-void slp_ast_set_long_val(SlpASTNode *node, long val) {
+void slp_ast_set_long_val(SlpASTNode *node, int64_t val) {
   if (node && node->type == SLP_AST_LONG)
     node->as.long_val = val;
 }
@@ -908,6 +924,15 @@ void slp_parser_free_node(SlpASTNode *node, SlpAllocator *allocator) {
     if (node->as.binop.right)
       slp_parser_free_node(node->as.binop.right, allocator);
     break;
+  case SLP_AST_ALIGN:
+    if (node->as.align.width)
+      slp_parser_free_node(node->as.align.width, allocator);
+    if (node->as.align.value)
+      slp_parser_free_node(node->as.align.value, allocator);
+    if (node->as.align.source)
+      allocator->reallocate(node->as.align.source, 0,
+                            allocator->user_data);
+    break;
   case SLP_AST_UNARYOP:
     if (node->as.unaryop.operand)
       slp_parser_free_node(node->as.unaryop.operand, allocator);
@@ -996,6 +1021,8 @@ void slp_parser_free_node(SlpASTNode *node, SlpAllocator *allocator) {
   case SLP_AST_CONTINUE:
     if (node->as.control.value)
       slp_parser_free_node(node->as.control.value, allocator);
+    if (node->type == SLP_AST_ASSERT && node->as.control.message)
+      slp_parser_free_node(node->as.control.message, allocator);
     break;
   case SLP_AST_IMPORT:
     if (node->as.import_stmt.path)
@@ -1094,7 +1121,8 @@ static void format_node(SlpASTNode *node, SlpStringBuffer *buffer,
 
   case SLP_AST_LONG: {
     char buf[64];
-    snprintf(buf, sizeof(buf), "%ldL", node->as.long_val);
+    snprintf(buf, sizeof(buf), "%lldL",
+             (long long)node->as.long_val);
     slp_string_buffer_append_string(buffer, buf, slp_utils_strlen(buf));
     break;
   }
@@ -1103,6 +1131,9 @@ static void format_node(SlpASTNode *node, SlpStringBuffer *buffer,
     char buf[64];
     snprintf(buf, sizeof(buf), "%.17g", node->as.double_val);
     slp_string_buffer_append_string(buffer, buf, slp_utils_strlen(buf));
+    if (node->number_is_double && strchr(buf, '.') == NULL &&
+        strchr(buf, 'e') == NULL && strchr(buf, 'E') == NULL)
+      slp_string_buffer_append_string(buffer, ".0", 2);
     break;
   }
 
@@ -1120,10 +1151,38 @@ static void format_node(SlpASTNode *node, SlpStringBuffer *buffer,
     break;
   }
 
+  case SLP_AST_ALIGN: {
+    slp_string_buffer_append_string(buffer, "\"$[", 3);
+    format_node(node->as.align.width, buffer, depth);
+    slp_string_buffer_append_char(buffer, ']');
+    if (node->as.align.value &&
+        node->as.align.value->type == SLP_AST_SCALAR &&
+        node->as.align.value->as.string_val) {
+      slp_string_buffer_append_string(
+          buffer, node->as.align.value->as.string_val,
+          slp_utils_strlen(node->as.align.value->as.string_val));
+    }
+    slp_string_buffer_append_char(buffer, '"');
+    break;
+  }
+
   case SLP_AST_SCALAR: {
+    bool simple_name = true;
+    for (const char *cursor = node->as.string_val; *cursor; cursor++) {
+      if (!((*cursor >= 'a' && *cursor <= 'z') ||
+            (*cursor >= 'A' && *cursor <= 'Z') ||
+            (*cursor >= '0' && *cursor <= '9') || *cursor == '_')) {
+        simple_name = false;
+        break;
+      }
+    }
+    if (!simple_name)
+      slp_string_buffer_append_char(buffer, '"');
     slp_string_buffer_append_char(buffer, '$');
     slp_string_buffer_append_string(
         buffer, node->as.string_val, slp_utils_strlen(node->as.string_val));
+    if (!simple_name)
+      slp_string_buffer_append_char(buffer, '"');
     break;
   }
 
@@ -1415,6 +1474,10 @@ static void format_node(SlpASTNode *node, SlpStringBuffer *buffer,
   case SLP_AST_ASSERT: {
     slp_string_buffer_append_string(buffer, "assert ", 7);
     format_node(node->as.control.value, buffer, depth);
+    if (node->as.control.message) {
+      slp_string_buffer_append_string(buffer, " : ", 3);
+      format_node(node->as.control.message, buffer, depth);
+    }
     break;
   }
 

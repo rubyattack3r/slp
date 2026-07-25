@@ -29,8 +29,12 @@ typedef enum {
     OP_STORE_LOCAL,
     OP_LOAD_GLOBAL,
     OP_STORE_GLOBAL,
+    OP_STORE_CATCH,
     OP_LOAD_UPVALUE,
     OP_STORE_UPVALUE,
+    OP_REFERENCE_LOCAL,
+    OP_REFERENCE_GLOBAL,
+    OP_REFERENCE_UPVALUE,
 
     OP_ADD,
     OP_SUBTRACT,
@@ -41,6 +45,7 @@ typedef enum {
     OP_NEGATE,
 
     OP_CONCAT,
+    OP_ALIGN,
     OP_REPEAT,
 
     OP_EQUAL,
@@ -74,25 +79,36 @@ typedef enum {
 
     OP_POP,
     OP_DUP,
+    OP_DUP2,
+    OP_SWAP,
+    OP_REVERSE,
 
     OP_JUMP,
     OP_JUMP_IF_FALSE,
     OP_JUMP_IF_TRUE,
+    OP_JUMP_IF_NULL,
     OP_LOOP,
 
     OP_CALL,
+    OP_CALL_NAMED,
     OP_RETURN,
+    OP_INLINE_RETURN,
 
     OP_CLOSURE,
     OP_CLOSE_UPVALUE,
 
     OP_FOREACH_NEXT,
+    OP_FOREACH_NEXT_VALUE,
 
     OP_BUILD_ARRAY,
     OP_BUILD_HASH,
+    OP_BUILD_KEY_VALUE,
 
     OP_INDEX_GET,
+    OP_INDEX_ENSURE,
     OP_INDEX_SET,
+    OP_TUPLE_GET,
+    OP_TUPLE_COMPOUND,
 
     OP_OBJ_EXPR,
 

@@ -85,6 +85,11 @@ int slp_platform_close_socket(int fd) {
     return closesocket((SOCKET)fd);
 }
 
+int slp_platform_shutdown_socket_write(int fd) {
+    /* SD_SEND is 1 but is not exposed by every MinGW Windows SDK header. */
+    return shutdown((SOCKET)fd, 1);
+}
+
 int slp_platform_waitpid(int pid, int *status, int options) {
     (void)pid; (void)status; (void)options;
     return 0; // waitpid is not directly applicable to arbitrary pids on Windows POPEN
@@ -159,4 +164,54 @@ double slp_platform_last_modified(const char *path) {
         return (double)st.st_mtime * 1000.0;
     }
     return 0.0;
+}
+
+int slp_platform_create_new_file(const char *path) {
+    HANDLE handle = CreateFileA(
+        path, GENERIC_WRITE, 0, NULL,
+        CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
+        NULL);
+    if (handle == INVALID_HANDLE_VALUE)
+        return -1;
+    CloseHandle(handle);
+    return 0;
+}
+
+int slp_platform_set_last_modified(
+    const char *path, int64_t milliseconds) {
+    HANDLE handle = CreateFileA(
+        path, FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE |
+            FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, NULL);
+    if (handle == INVALID_HANDLE_VALUE)
+        return -1;
+    uint64_t intervals =
+        ((uint64_t)milliseconds +
+         11644473600000ULL) *
+        10000ULL;
+    FILETIME modified;
+    modified.dwLowDateTime =
+        (DWORD)(intervals & 0xffffffffULL);
+    modified.dwHighDateTime =
+        (DWORD)(intervals >> 32);
+    BOOL success = SetFileTime(
+        handle, NULL, NULL, &modified);
+    CloseHandle(handle);
+    return success ? 0 : -1;
+}
+
+int slp_platform_set_read_only(const char *path) {
+    DWORD attributes =
+        GetFileAttributesA(path);
+    if (attributes ==
+        INVALID_FILE_ATTRIBUTES)
+        return -1;
+    return SetFileAttributesA(
+               path,
+               attributes |
+                   FILE_ATTRIBUTE_READONLY)
+        ? 0
+        : -1;
 }

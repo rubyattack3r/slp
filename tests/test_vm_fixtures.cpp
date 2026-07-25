@@ -54,6 +54,7 @@ static VMFixtureResult run_vm_fixture(const char *filepath, const char *name) {
     SlpVM *vm = slp_vm_new(&vmfix_allocator);
     slp_stdlib_init(vm);
     slp_vm_set_error_fn(vm, fix_err_handler, NULL);
+    slp_vm_set_source_name(vm, name);
     r.result = slp_vm_interpret(vm, source);
     slp_vm_free(vm);
     free(source);

@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include <cstdio>
 #include <string.h>
 #include <math.h>
 
@@ -117,13 +118,85 @@ TEST_CASE("Object hash set/get") {
     SLP_FREE(&val_allocator, h);
 }
 
-TEST_CASE("FNV-1a hash function") {
+TEST_CASE("Java-style string hash function") {
     uint32_t h1 = slp_hash_string("hello", 5);
     uint32_t h2 = slp_hash_string("hello", 5);
     uint32_t h3 = slp_hash_string("world", 5);
     CHECK(h1 == h2);
     CHECK(h1 != h3);
     CHECK(h1 != 0);
+}
+
+TEST_CASE("Hash keys use Sleep string-value identity") {
+    SlpObjHash *hash = slp_obj_hash_new(&val_allocator);
+    REQUIRE(hash != nullptr);
+    SlpObjString *string_one =
+        slp_obj_string_new(&val_allocator, "1", 1);
+    REQUIRE(string_one != nullptr);
+
+    CHECK(slp_obj_hash_set(
+        &val_allocator, hash, SLP_NUM_VAL(1),
+        SLP_NUM_VAL(10)));
+    CHECK(SLP_AS_NUM(slp_obj_hash_get(
+              hash, SLP_OBJ_VAL(string_one))) == 10.0);
+    CHECK(slp_obj_hash_set(
+        &val_allocator, hash, SLP_OBJ_VAL(string_one),
+        SLP_NUM_VAL(20)));
+    CHECK(hash->count == 1);
+    CHECK(SLP_AS_NUM(slp_obj_hash_get(
+              hash, SLP_NUM_VAL(1))) == 20.0);
+
+    SLP_FREE(&val_allocator, string_one);
+    SLP_FREE(&val_allocator, hash->entries);
+    SLP_FREE(&val_allocator, hash);
+}
+
+TEST_CASE("Hash insertion reuses tombstones when no virgin bucket remains") {
+    SlpObjHash *hash = slp_obj_hash_new(&val_allocator);
+    REQUIRE(hash != nullptr);
+    SlpObjString *keys[16] = {};
+
+    for (int i = 0; i < 12; i++) {
+        char text[8];
+        int length = std::snprintf(text, sizeof(text), "k%d", i);
+        keys[i] = slp_obj_string_new(
+            &val_allocator, text, static_cast<uint32_t>(length));
+        REQUIRE(keys[i] != nullptr);
+        REQUIRE(slp_obj_hash_set(
+            &val_allocator, hash, SLP_OBJ_VAL(keys[i]),
+            SLP_NUM_VAL((double)i)));
+    }
+    CHECK(hash->capacity == 16);
+    for (int i = 0; i < 12; i++)
+        REQUIRE(slp_obj_hash_delete(
+            &val_allocator, hash, SLP_OBJ_VAL(keys[i])));
+    CHECK(hash->count == 0);
+    /* Model the reachable worst case where probing has consumed every
+       never-used bucket while deletions left the rest as tombstones. */
+    for (int i = 0; i < hash->capacity; i++) {
+        if (SLP_IS_NULL(hash->entries[i].key))
+            hash->entries[i].value = SLP_TRUE_VAL;
+    }
+
+    for (int i = 12; i < 16; i++) {
+        char text[8];
+        int length = std::snprintf(text, sizeof(text), "k%d", i);
+        keys[i] = slp_obj_string_new(
+            &val_allocator, text, static_cast<uint32_t>(length));
+        REQUIRE(keys[i] != nullptr);
+        REQUIRE(slp_obj_hash_set(
+            &val_allocator, hash, SLP_OBJ_VAL(keys[i]),
+            SLP_NUM_VAL((double)i)));
+    }
+    CHECK(hash->count == 4);
+    for (int i = 12; i < 16; i++)
+        CHECK(slp_value_as_number(slp_obj_hash_get(
+                  hash, SLP_OBJ_VAL(keys[i]))) == (double)i);
+
+    for (SlpObjString *key : keys)
+        SLP_FREE(&val_allocator, key);
+    SLP_FREE(&val_allocator, hash->entries);
+    SLP_FREE(&val_allocator, hash);
 }
 
 TEST_CASE("Chunk write and constants") {

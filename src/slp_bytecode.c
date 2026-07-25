@@ -121,6 +121,7 @@ static bool read_f64(SlpBytecodeReader *r, double *out) {
 #define CONST_TAG_NUMBER  2
 #define CONST_TAG_STRING  3
 #define CONST_TAG_LONG    4
+#define CONST_TAG_DOUBLE  5
 
 static bool serialize_value(SlpBytecodeWriter *w, SlpValue val) {
     if (SLP_IS_NULL(val)) {
@@ -142,6 +143,9 @@ static bool serialize_value(SlpBytecodeWriter *w, SlpValue val) {
             SlpObjLong *l = (SlpObjLong*)obj;
             write_u8(w, CONST_TAG_LONG);
             write_u64(w, (uint64_t)l->value);
+        } else if (obj->type == SLP_OBJ_DOUBLE) {
+            write_u8(w, CONST_TAG_DOUBLE);
+            write_f64(w, ((SlpObjDouble*)obj)->value);
         } else {
             return false;
         }
@@ -190,6 +194,13 @@ static SlpValue deserialize_value(SlpBytecodeReader *r, SlpAllocator *allocator)
         if (!read_u64(r, &v)) return SLP_NULL_VAL;
         SlpObjLong *l = slp_obj_long_new(allocator, (int64_t)v);
         return l ? SLP_OBJ_VAL(l) : SLP_NULL_VAL;
+    }
+    case CONST_TAG_DOUBLE: {
+        double value;
+        if (!read_f64(r, &value)) return SLP_NULL_VAL;
+        SlpObjDouble *number =
+            slp_obj_double_new(allocator, value);
+        return number ? SLP_OBJ_VAL(number) : SLP_NULL_VAL;
     }
     default:
         return SLP_NULL_VAL;

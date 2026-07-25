@@ -1,6 +1,37 @@
 #include "slp_chunk.h"
 #include "slp_utils.h"
 
+/*
+ * Runtime numeric equality is deliberately type-coercing, but the constant
+ * pool must preserve Sleep's distinct Int, Long, and Double representations.
+ * Otherwise, literals such as 7, 7L, and 7.0 can all resolve to whichever
+ * typed constant was emitted first.
+ */
+static bool constants_equal(SlpValue a, SlpValue b) {
+    if (SLP_IS_NUM(a) || SLP_IS_NUM(b)) {
+        return SLP_IS_NUM(a) && SLP_IS_NUM(b) &&
+               SLP_AS_NUM(a) == SLP_AS_NUM(b);
+    }
+
+    if (SLP_IS_OBJ(a) || SLP_IS_OBJ(b)) {
+        if (!SLP_IS_OBJ(a) || !SLP_IS_OBJ(b) ||
+            SLP_OBJ_TYPE(a) != SLP_OBJ_TYPE(b)) {
+            return false;
+        }
+
+        switch (SLP_OBJ_TYPE(a)) {
+            case SLP_OBJ_LONG:
+                return SLP_AS_LONG(a)->value == SLP_AS_LONG(b)->value;
+            case SLP_OBJ_DOUBLE:
+                return SLP_AS_DOUBLE(a)->value == SLP_AS_DOUBLE(b)->value;
+            default:
+                return SLP_AS_OBJ(a) == SLP_AS_OBJ(b);
+        }
+    }
+
+    return slp_value_equals(a, b);
+}
+
 void slp_chunk_init(SlpChunk *chunk, SlpAllocator *allocator) {
     chunk->allocator = allocator;
     chunk->code = NULL;
@@ -33,7 +64,7 @@ int slp_chunk_write(SlpChunk *chunk, uint8_t byte, int line) {
 
 int slp_chunk_add_constant(SlpChunk *chunk, SlpValue value) {
     for (int i = 0; i < chunk->constant_count; i++) {
-        if (slp_value_equals(chunk->constants[i], value))
+        if (constants_equal(chunk->constants[i], value))
             return i;
     }
     if (chunk->constant_count + 1 > chunk->constant_capacity) {

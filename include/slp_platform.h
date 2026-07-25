@@ -27,12 +27,17 @@ int slp_platform_chdir(const char *path);
 char *slp_platform_getcwd(char *buf, size_t size);
 double slp_platform_file_size(const char *path);
 double slp_platform_last_modified(const char *path);
+int slp_platform_create_new_file(const char *path);
+int slp_platform_set_last_modified(
+    const char *path, int64_t milliseconds);
+int slp_platform_set_read_only(const char *path);
 
 // Path Formatting helpers
 char slp_platform_path_separator(void);
 
 // File / Socket / Process utilities
 int slp_platform_close_socket(int fd);
+int slp_platform_shutdown_socket_write(int fd);
 int slp_platform_waitpid(int pid, int *status, int options);
 int slp_platform_access(const char *path, int mode);
 FILE *slp_platform_fdopen(int fd, const char *mode);

@@ -124,6 +124,7 @@ typedef struct {
   const char *start;
   const char *current;
   int line;
+  int start_line;
   SlpAllocator *allocator;
 } SlpLexer;
 

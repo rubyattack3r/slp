@@ -7,7 +7,7 @@ assert true : "Import should not crash the VM";
 
 # OP_CLASS_LITERAL
 $cls = ^java.util.LinkedList;
-assert $cls eq "java.util.LinkedList" : "Class literal should resolve to a string";
+assert "$cls" eq "class java.util.LinkedList" : "Class literal should stay an object";
 
 # OP_OBJ_EXPR (Object Instantiation / Method Invocation)
 $obj = [new LinkedList];

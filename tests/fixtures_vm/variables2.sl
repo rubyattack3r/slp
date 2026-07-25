@@ -1,4 +1,4 @@
-# Test variables with and without sigils
+# Test scalar and collection variables
 $a = 1;
 assert($a == 1);
 
@@ -10,24 +10,24 @@ assert(@arr[0] == 1);
 assert(size(%h) == 2);
 assert(%h[1] == "a");
 
-# Sigilless bare identifiers
-test = "hello";
-assert(test == "hello");
+# Scalars and collections use Sleep sigils.
+$test = "hello";
+assert($test == "hello");
 
-test_num = 42;
-assert(test_num == 42);
+$test_num = 42;
+assert($test_num == 42);
 
-test_arr = @(4, 5);
-assert(size(test_arr) == 2);
-assert(test_arr[1] == 5);
+@test_arr = @(4, 5);
+assert(size(@test_arr) == 2);
+assert(@test_arr[1] == 5);
 
-test_hash = %("key" => "value");
-assert(size(test_hash) == 1);
-assert(test_hash["key"] == "value");
+%test_hash = %("key" => "value");
+assert(size(%test_hash) == 1);
+assert(%test_hash["key"] == "value");
 
 # Mutating variables
-test = test_num + 8;
-assert(test == 50);
+$test = $test_num + 8;
+assert($test == 50);
 
-$a = $a + test_arr[0];
+$a = $a + @test_arr[0];
 assert($a == 5);

@@ -5,14 +5,12 @@ $s1 = "hello world";
 $res_tr = tr($s1, "el", "31");
 assert $res_tr eq "h311o wor1d" : "tr output was " . $res_tr;
 
-$res_rep = replaceAt($s1, 6, "craziness");
-assert $res_rep eq "hello crazi" : "replaceAt output was " . $res_rep;
+$res_rep = replaceAt($s1, "craziness", 6);
+assert $res_rep eq "hello craziness" : "replaceAt output was " . $res_rep;
 
-# replaceAt edge cases: index out of bounds
-$res_rep2 = replaceAt($s1, 100, "abc");
-assert $res_rep2 eq $s1;
-$res_rep3 = replaceAt($s1, -1, "abc");
-assert $res_rep3 eq $s1;
+# replaceAt supports negative indices and an explicit deletion count
+$res_rep2 = replaceAt($s1, "Sleep", -5, 5);
+assert $res_rep2 eq "hello Sleep";
 
 # Part 2: Substrings and Indexing (left, right, mid, indexOf, lindexOf)
 $str = "abracadabra";
@@ -21,16 +19,16 @@ assert left($str, 0) eq "";
 assert left($str, 100) eq "abracadabra";
 
 assert right($str, 4) eq "abra";
-assert right($str, 0) eq "";
-assert right($str, 100) eq "abracadabra";
+assert right($str, 0) eq "abracadabra";
+assert right($str, 11) eq "abracadabra";
 
 assert mid($str, 3, 5) eq "acada" : "mid was " . mid($str, 3, 5);
 assert mid($str, 8, 10) eq "bra";
-assert mid($str, -1, 3) eq "abr"; # start < 0 becomes 0
+assert mid($str, -4, 3) eq "abr";
 
 assert indexOf($str, "rac") == 2;
 assert indexOf($str, "cad", 2) == 4;
-assert indexOf($str, "cad", 5) == -1;
+assert indexOf($str, "cad", 5) is $null;
 assert lindexOf($str, "a") == 10;
 assert lindexOf($str, "bra") == 8;
 

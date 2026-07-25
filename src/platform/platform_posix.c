@@ -10,6 +10,8 @@
 #include <dirent.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <sys/time.h>
+#include <sys/socket.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -76,6 +78,10 @@ char slp_platform_path_separator(void) {
 
 int slp_platform_close_socket(int fd) {
     return close(fd);
+}
+
+int slp_platform_shutdown_socket_write(int fd) {
+    return shutdown(fd, SHUT_WR);
 }
 
 int slp_platform_waitpid(int pid, int *status, int options) {
@@ -196,4 +202,38 @@ double slp_platform_last_modified(const char *path) {
         return (double)st.st_mtime * 1000.0;
     }
     return 0.0;
+}
+
+int slp_platform_create_new_file(const char *path) {
+    int descriptor = open(
+        path, O_CREAT | O_EXCL | O_WRONLY,
+        0666);
+    if (descriptor < 0) return -1;
+    return close(descriptor);
+}
+
+int slp_platform_set_last_modified(
+    const char *path, int64_t milliseconds) {
+    struct stat status;
+    if (stat(path, &status) != 0)
+        return -1;
+    struct timeval times[2];
+    times[0].tv_sec = status.st_atime;
+    times[0].tv_usec = 0;
+    times[1].tv_sec =
+        (time_t)(milliseconds / 1000);
+    times[1].tv_usec =
+        (suseconds_t)(
+            (milliseconds % 1000) * 1000);
+    return utimes(path, times);
+}
+
+int slp_platform_set_read_only(const char *path) {
+    struct stat status;
+    if (stat(path, &status) != 0)
+        return -1;
+    return chmod(
+        path,
+        status.st_mode &
+            ~(S_IWUSR | S_IWGRP | S_IWOTH));
 }

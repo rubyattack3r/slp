@@ -33,6 +33,8 @@ typedef struct SlpCompiler {
     int loop_continue_target;
     int loop_exit_jump;
     int loop_scope_depth;
+    int try_depth;
+    int loop_try_depth;
     int break_jumps[256];
     int break_jump_count;
     int continue_jumps[256];
@@ -43,6 +45,7 @@ typedef struct SlpCompiler {
     const char *error_message;
 
     bool repl_mode;
+    bool inline_body;
 } SlpCompiler;
 
 SlpObjFunction *slp_compile(SlpVM *vm, SlpASTNode *ast, SlpAllocator *allocator);

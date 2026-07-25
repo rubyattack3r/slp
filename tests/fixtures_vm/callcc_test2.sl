@@ -1,8 +1,8 @@
 sub test_callcc {
     $x = callcc {
         println("Inside block");
-        [$1: 42];
-        println("Should not print");
+        $owner_result = [$1: 42];
+        println("Owner returned " . $owner_result);
         return -1;
     };
     println("After block, x is " . $x);
@@ -10,4 +10,4 @@ sub test_callcc {
 }
 
 $res = test_callcc();
-assert $res == 43;
+assert $res == -1;
