@@ -83,8 +83,9 @@ BESTLINE_OBJ = $(BUILD_DIR)/deps/bestline/bestline.o
 # ---------------------------------------------------------------------------
 # Phony targets
 # ---------------------------------------------------------------------------
-.PHONY: all clean test format-check bench amalgamate amalgamate-single slp slp_lib \
-        tools test_runner bench_slp slp_fmt slpd debug debug-asan
+.PHONY: all clean test test-amalgamation format-check bench amalgamate \
+        amalgamate-single slp slp_lib tools test_runner bench_slp slp_fmt \
+        slpd debug debug-asan
 
 all: slp_lib slp tools
 
@@ -168,6 +169,10 @@ test: test_runner
 	ASAN_OPTIONS=abort_on_error=1:halt_on_error=1 \
 	UBSAN_OPTIONS=abort_on_error=1:halt_on_error=1 \
 	./$(BIN_DIR)/test_runner$(EXE_EXT)
+	./tests/test_amalgamation.sh
+
+test-amalgamation:
+	./tests/test_amalgamation.sh
 
 format-check: slp_fmt
 	find tests -name '*.sl' | grep -vE 'argerr.sl|errors1.sl|errors2.sl|errors3.sl|errors5.sl|hoeserror.sl|keyvalueerr.sl|noterm.sl|noterm2.sl|scalref.sl|sillysyntax.sl|warn.sl' | xargs -n1 ./bin/slp_fmt > /dev/null

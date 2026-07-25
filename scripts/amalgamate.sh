@@ -1,83 +1,315 @@
-#!/bin/bash
-# amalgamate.sh - Creates a single slp.h and slp.c from the project sources
+#!/usr/bin/env bash
+# Generate copyable core and standard-library amalgamations.
 
-set -e
+set -euo pipefail
 
-# Ensure we are in the scripts directory so relative paths work
-cd "$(dirname "$0")"
-
-OUT_DIR="../dist"
-mkdir -p "$OUT_DIR"
-mkdir -p "$OUT_DIR/platform"
-cp ../src/platform/*.c "$OUT_DIR/platform/"
-
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+OUT_DIR="$ROOT_DIR/dist"
 SINGLE_HEADER=0
-if [ "$1" == "--single" ]; then
-    SINGLE_HEADER=1
-    echo "Single header mode enabled."
-fi
 
-HEADER_OUT="$OUT_DIR/slp.h"
-SOURCE_OUT="$OUT_DIR/slp.c"
+case "${1:-}" in
+    "")
+        ;;
+    --single)
+        SINGLE_HEADER=1
+        ;;
+    *)
+        echo "Usage: $0 [--single]" >&2
+        exit 2
+        ;;
+esac
 
-echo "Amalgamating headers into $HEADER_OUT..."
-cat << 'EOF' > "$HEADER_OUT"
-/*
- * SLP Amalgamated Header
- * Generated automatically.
- */
+CORE_HEADERS=(
+    include/slp_common.h
+    include/slp_core.h
+    include/slp_platform.h
+    include/slp_utils.h
+    include/slp_lexer.h
+    include/slp_parser.h
+    include/slp_ast.h
+    include/slp_opcodes.h
+    include/slp_value.h
+    include/slp_chunk.h
+    include/slp_gc.h
+    include/slp_vm.h
+    include/slp_embed.h
+    include/slp_compiler.h
+    include/slp_disasm.h
+    include/slp_bytecode.h
+)
+
+CORE_SOURCES=(
+    src/slp_utils.c
+    src/slp_lexer.c
+    src/slp_parser.c
+    src/slp_ast.c
+    src/slp_value.c
+    src/slp_chunk.c
+    src/slp_embed.c
+    src/slp_gc.c
+    src/slp_vm.c
+    src/slp_compiler.c
+    src/slp_disasm.c
+    src/slp_bytecode.c
+)
+
+mkdir -p "$OUT_DIR"
+rm -f \
+    "$OUT_DIR/slp.h" \
+    "$OUT_DIR/slp.c" \
+    "$OUT_DIR/slp_stdlib.h" \
+    "$OUT_DIR/slp_stdlib.c"
+# Older amalgamations copied platform sources into this directory.
+rm -rf "$OUT_DIR/platform"
+
+append_header_body() {
+    local input="$ROOT_DIR/$1"
+    local output="$2"
+
+    printf '\n/* --- File: %s --- */\n' "$1" >> "$output"
+    awk '
+        /^[[:space:]]*#include[[:space:]]*"/ { next }
+        /^[[:space:]]*#ifndef[[:space:]]+SLP_[A-Z0-9_]+_H[[:space:]]*$/ {
+            next
+        }
+        /^[[:space:]]*#define[[:space:]]+SLP_[A-Z0-9_]+_H[[:space:]]*$/ {
+            next
+        }
+        { lines[++count] = $0 }
+        END {
+            while (count > 0 && lines[count] ~ /^[[:space:]]*$/)
+                count--
+            if (count > 0 &&
+                lines[count] ~ /^[[:space:]]*#endif([[:space:]]|$)/)
+                count--
+            for (i = 1; i <= count; i++)
+                print lines[i]
+        }
+    ' "$input" >> "$output"
+    printf '\n' >> "$output"
+}
+
+append_source_body() {
+    local input="$ROOT_DIR/$1"
+    local output="$2"
+
+    printf '\n/* --- File: %s --- */\n' "$1" >> "$output"
+    awk '
+        !/^[[:space:]]*#include[[:space:]]*"/ { print }
+    ' "$input" >> "$output"
+    printf '\n' >> "$output"
+}
+
+write_feature_macros() {
+    local output="$1"
+    local condition="$2"
+
+    cat >> "$output" <<EOF
+#if $condition
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
+#ifndef _BSD_SOURCE
+#define _BSD_SOURCE 1
+#endif
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+#endif
+EOF
+}
+
+write_core_declarations() {
+    local output="$1"
+
+    cat >> "$output" <<'EOF'
 #ifndef SLP_H
 #define SLP_H
 
-#include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 EOF
 
-# Add headers in dependency order. Filter out #include "..."
-for f in ../include/slp_common.h ../include/slp_core.h ../include/slp_platform.h ../include/slp_utils.h ../include/slp_lexer.h ../include/slp_parser.h ../include/slp_ast.h ../include/slp_opcodes.h ../include/slp_value.h ../include/slp_chunk.h ../include/slp_gc.h ../include/slp_vm.h ../include/slp_compiler.h ../include/slp_disasm.h ../include/slp_bytecode.h; do
-    echo "/* --- File: $f --- */" >> "$HEADER_OUT"
-    # Remove #pragma once, #ifndef/#define guards at the top, and #include "..." local headers
-    cat "$f" | egrep -v '^\s*#include\s+"' | egrep -v '^\s*#ifndef\s+SLP_.*_H\s*$' | egrep -v '^\s*#define\s+SLP_.*_H\s*$' | python3 -c "import sys, re; lines = sys.stdin.readlines();
-while lines and lines[-1].strip() == '': lines.pop();
-if lines and re.match(r'^\s*#endif.*', lines[-1]): lines.pop();
-sys.stdout.write(''.join(lines))" >> "$HEADER_OUT"
-    echo "" >> "$HEADER_OUT"
-done
+    local item
+    for item in "${CORE_HEADERS[@]}"; do
+        append_header_body "$item" "$output"
+    done
 
-if [ "$SINGLE_HEADER" -eq 0 ]; then
-    echo "#endif // SLP_H" >> "$HEADER_OUT"
-fi
+    cat >> "$output" <<'EOF'
+#ifdef __cplusplus
+}
+#endif
 
-if [ "$SINGLE_HEADER" -eq 0 ]; then
-    echo "Amalgamating sources into $SOURCE_OUT..."
-    cat << 'EOF' > "$SOURCE_OUT"
-/*
- * SLP Amalgamated Source
- * Generated automatically.
- */
+#endif /* SLP_H */
+EOF
+}
+
+write_core_implementation() {
+    local output="$1"
+    local item
+
+    append_header_body "src/slp_embed_internal.h" "$output"
+    for item in "${CORE_SOURCES[@]}"; do
+        append_source_body "$item" "$output"
+    done
+
+    cat >> "$output" <<'EOF'
+
+/* --- Platform implementation --- */
+#ifdef _WIN32
+EOF
+    append_source_body "src/platform/platform_win32.c" "$output"
+    cat >> "$output" <<'EOF'
+#else
+EOF
+    append_source_body "src/platform/platform_posix.c" "$output"
+    cat >> "$output" <<'EOF'
+#endif
+EOF
+}
+
+write_stdlib_declarations() {
+    local output="$1"
+
+    cat >> "$output" <<'EOF'
+#ifndef SLP_STDLIB_H
+#define SLP_STDLIB_H
+
 #include "slp.h"
 
-EOF
-fi
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-for f in ../src/slp_utils.c ../src/slp_lexer.c ../src/slp_parser.c ../src/slp_ast.c ../src/slp_value.c ../src/slp_chunk.c ../src/slp_gc.c ../src/slp_vm.c ../src/slp_compiler.c ../src/slp_disasm.c ../src/slp_bytecode.c ../src/slp_platform.c; do
-    if [ "$SINGLE_HEADER" -eq 1 ]; then
-        echo "/* --- File: $f --- */" >> "$HEADER_OUT"
-        cat "$f" | egrep -v '^\s*#include\s+"' >> "$HEADER_OUT"
-        echo "" >> "$HEADER_OUT"
-    else
-        echo "/* --- File: $f --- */" >> "$SOURCE_OUT"
-        cat "$f" | egrep -v '^\s*#include\s+"' >> "$SOURCE_OUT"
-        echo "" >> "$SOURCE_OUT"
-    fi
-done
+void slp_stdlib_init(SlpVM *vm);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SLP_STDLIB_H */
+EOF
+}
+
+HEADER_OUT="$OUT_DIR/slp.h"
+STDLIB_HEADER_OUT="$OUT_DIR/slp_stdlib.h"
 
 if [ "$SINGLE_HEADER" -eq 1 ]; then
-    # Close the inclusion guard if we combined everything
-    echo "#endif // SLP_H" >> "$HEADER_OUT"
-    echo "Single header amalgamation complete: $HEADER_OUT"
+    cat > "$HEADER_OUT" <<'EOF'
+/*
+ * SLP amalgamated core
+ *
+ * Generated by scripts/amalgamate.sh. Do not edit this file directly.
+ * Define SLP_IMPLEMENTATION in exactly one C file before including slp.h.
+ */
+EOF
+    write_feature_macros \
+        "$HEADER_OUT" \
+        '!defined(_WIN32) && defined(SLP_IMPLEMENTATION)'
 else
-    echo "Amalgamation complete."
+    cat > "$HEADER_OUT" <<'EOF'
+/*
+ * SLP amalgamated core
+ *
+ * Generated by scripts/amalgamate.sh. Do not edit this file directly.
+ * Compile slp.c once and include slp.h wherever the API is used.
+ */
+EOF
+fi
+write_core_declarations "$HEADER_OUT"
+
+if [ "$SINGLE_HEADER" -eq 1 ]; then
+    cat > "$STDLIB_HEADER_OUT" <<'EOF'
+/*
+ * SLP standard-library amalgamation
+ *
+ * Generated by scripts/amalgamate.sh. Do not edit this file directly.
+ * Define SLP_STDLIB_IMPLEMENTATION in exactly one C file before including
+ * slp_stdlib.h, then call slp_stdlib_init() for each new VM.
+ */
+EOF
+    write_feature_macros \
+        "$STDLIB_HEADER_OUT" \
+        '!defined(_WIN32) && defined(SLP_STDLIB_IMPLEMENTATION)'
+else
+    cat > "$STDLIB_HEADER_OUT" <<'EOF'
+/*
+ * SLP standard-library amalgamation
+ *
+ * Generated by scripts/amalgamate.sh. Do not edit this file directly.
+ * Compile slp_stdlib.c with slp.c, then call slp_stdlib_init() for each VM.
+ */
+EOF
+fi
+write_stdlib_declarations "$STDLIB_HEADER_OUT"
+
+if [ "$SINGLE_HEADER" -eq 1 ]; then
+    cat >> "$HEADER_OUT" <<'EOF'
+
+#if defined(SLP_IMPLEMENTATION) && \
+    !defined(SLP_IMPLEMENTATION_INCLUDED)
+#define SLP_IMPLEMENTATION_INCLUDED
+EOF
+    write_core_implementation "$HEADER_OUT"
+    cat >> "$HEADER_OUT" <<'EOF'
+#endif /* SLP_IMPLEMENTATION */
+EOF
+
+    cat >> "$STDLIB_HEADER_OUT" <<'EOF'
+
+#if defined(SLP_STDLIB_IMPLEMENTATION) && \
+    !defined(SLP_STDLIB_IMPLEMENTATION_INCLUDED)
+#define SLP_STDLIB_IMPLEMENTATION_INCLUDED
+EOF
+    append_source_body "extensions/stdlib/stdlib.c" "$STDLIB_HEADER_OUT"
+    cat >> "$STDLIB_HEADER_OUT" <<'EOF'
+#endif /* SLP_STDLIB_IMPLEMENTATION */
+EOF
+
+    echo "Generated single-header core: $HEADER_OUT"
+    echo "Generated single-header stdlib: $STDLIB_HEADER_OUT"
+else
+    SOURCE_OUT="$OUT_DIR/slp.c"
+    STDLIB_SOURCE_OUT="$OUT_DIR/slp_stdlib.c"
+
+    cat > "$SOURCE_OUT" <<'EOF'
+/*
+ * SLP amalgamated core implementation
+ *
+ * Compile this file with slp.h.
+ */
+EOF
+    write_feature_macros "$SOURCE_OUT" '!defined(_WIN32)'
+    cat >> "$SOURCE_OUT" <<'EOF'
+#include "slp.h"
+EOF
+    write_core_implementation "$SOURCE_OUT"
+
+    cat > "$STDLIB_SOURCE_OUT" <<'EOF'
+/*
+ * SLP amalgamated standard-library implementation
+ *
+ * Compile this file with slp.c when the standard library is needed.
+ */
+EOF
+    write_feature_macros "$STDLIB_SOURCE_OUT" '!defined(_WIN32)'
+    cat >> "$STDLIB_SOURCE_OUT" <<'EOF'
+#include "slp_stdlib.h"
+EOF
+    append_source_body "extensions/stdlib/stdlib.c" "$STDLIB_SOURCE_OUT"
+
+    echo "Generated core: $HEADER_OUT and $SOURCE_OUT"
+    echo "Generated stdlib: $STDLIB_HEADER_OUT and $STDLIB_SOURCE_OUT"
 fi
