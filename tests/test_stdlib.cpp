@@ -1443,7 +1443,7 @@ TEST_CASE("stdlib include evaluates in the caller scope and restores source meta
 
     CHECK(output.find("Included with ") == 0);
     CHECK(output.find(
-        "/tests/fixtures/incit.sl\n") !=
+        "tests/fixtures/incit.sl\n") !=
         std::string::npos);
     CHECK(output.find("post:\n") !=
           std::string::npos);

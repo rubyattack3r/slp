@@ -69,6 +69,11 @@ endif
 # Sources and objects (out-of-source build)
 # ---------------------------------------------------------------------------
 SRC = $(wildcard src/*.c)
+ifeq ($(IS_WINDOWS),1)
+  SRC += src/platform/regex/regcomp.c \
+         src/platform/regex/regexec.c \
+         src/platform/regex/tre-mem.c
+endif
 OBJ = $(patsubst src/%.c,$(BUILD_DIR)/src/%.o,$(SRC))
 
 TOOLS_COMMON_OBJ = $(BUILD_DIR)/tools/common/utils.o $(BUILD_DIR)/tools/common/console.o

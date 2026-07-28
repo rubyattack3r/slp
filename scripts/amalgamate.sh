@@ -54,6 +54,14 @@ CORE_SOURCES=(
     src/slp_bytecode.c
 )
 
+WINDOWS_REGEX_HEADER="src/platform/regex/regex.h"
+WINDOWS_REGEX_INTERNAL_HEADER="src/platform/regex/tre.h"
+WINDOWS_REGEX_SOURCES=(
+    src/platform/regex/tre-mem.c
+    src/platform/regex/regcomp.c
+    src/platform/regex/regexec.c
+)
+
 mkdir -p "$OUT_DIR"
 rm -f \
     "$OUT_DIR/slp.h" \
@@ -160,6 +168,16 @@ write_core_implementation() {
     local output="$1"
     local item
 
+    cat >> "$output" <<'EOF'
+
+/* --- Private Windows regex declarations --- */
+#ifdef _WIN32
+EOF
+    append_header_body "$WINDOWS_REGEX_HEADER" "$output"
+    cat >> "$output" <<'EOF'
+#endif
+EOF
+
     append_header_body "src/slp_embed_internal.h" "$output"
     for item in "${CORE_SOURCES[@]}"; do
         append_source_body "$item" "$output"
@@ -170,6 +188,10 @@ write_core_implementation() {
 /* --- Platform implementation --- */
 #ifdef _WIN32
 EOF
+    append_header_body "$WINDOWS_REGEX_INTERNAL_HEADER" "$output"
+    for item in "${WINDOWS_REGEX_SOURCES[@]}"; do
+        append_source_body "$item" "$output"
+    done
     append_source_body "src/platform/platform_win32.c" "$output"
     cat >> "$output" <<'EOF'
 #else

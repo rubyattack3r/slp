@@ -8,7 +8,8 @@ that require a real JVM, such as loading arbitrary Java classes, JARs, or
 
 ## Build it
 
-You need `make` and a C/C++ compiler:
+You need `make` and a C99 compiler. The runtime and tools are C-only; a C++
+compiler is required only for the doctest-based test suite:
 
 ```sh
 make
@@ -58,8 +59,10 @@ The usual flow is:
 4. Run code with `slp_vm_interpret()`.
 5. Free the VM.
 
-All runtime allocations go through the host-provided `SlpAllocator`, allowing
-the application to track, limit, or customize SLP's memory use.
+All allocations performed by SLP's core—including its bundled Windows regex
+backend—go through the host-provided `SlpAllocator`, allowing the application
+to track, limit, or customize SLP's memory use. Platform C library routines
+may perform their own internal allocations.
 
 Include `slp_embed.h` when native functions need to read Sleep arguments or
 retain and call a Sleep closure:
@@ -192,12 +195,18 @@ or Java `Loadable` extensions is therefore outside its scope.
 
 - `include/` — public C API
 - `src/` — parser, compiler, VM, values, and garbage collector
+- `src/platform/regex/` — bundled C99 Windows regex compatibility backend
 - `extensions/stdlib/` — standard Sleep functions
 - `tools/` — interpreter, formatter, disassembler, and benchmark
 - `tests/` — unit tests and reference fixtures
 
 ## License
 
-The C implementation is available under the [MIT License](LICENSE). Test
-fixtures derived from the original Sleep project retain their
+SLP's original C implementation is available under the
+[MIT License](LICENSE). The interpreter includes Bestline, and Windows builds
+include a vendored TRE-derived regular expression backend. Their provenance,
+copyright, and BSD-style license terms are provided in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Test fixtures derived from the original Sleep project retain their
 [CC BY-SA 3.0 US license](tests/LICENSE).

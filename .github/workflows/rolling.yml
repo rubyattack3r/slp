@@ -29,6 +29,7 @@ jobs:
 
           # Package Linux
           mkdir -p slp-linux-amd64/bin slp-linux-amd64/lib slp-linux-amd64/include slp-linux-amd64/src
+          cp README.md LICENSE THIRD_PARTY_NOTICES.md slp-linux-amd64/
           cp bin/slp bin/slp_fmt bin/slpd bin/bench_slp slp-linux-amd64/bin/
           cp bin/libslp.a slp-linux-amd64/lib/
           cp dist/slp.h slp-linux-amd64/include/
@@ -40,9 +41,15 @@ jobs:
           nix develop -c make clean
           nix develop -c make all tools CC="zig cc -target x86_64-windows" CXX="zig c++ -target x86_64-windows"
           nix develop -c make amalgamate
+          nix develop -c env \
+            CC="zig cc -target x86_64-windows" \
+            SLP_AMALGAMATION_RUN=0 \
+            SLP_AMALGAMATION_LDLIBS="-lm -lws2_32" \
+            ./tests/test_amalgamation.sh
 
           # Package Windows
           mkdir -p slp-windows-amd64/bin slp-windows-amd64/lib slp-windows-amd64/include slp-windows-amd64/src
+          cp README.md LICENSE THIRD_PARTY_NOTICES.md slp-windows-amd64/
           cp bin/slp.exe bin/slp_fmt.exe bin/slpd.exe bin/bench_slp.exe slp-windows-amd64/bin/
           cp bin/libslp.a slp-windows-amd64/lib/
           cp dist/slp.h slp-windows-amd64/include/
@@ -77,6 +84,7 @@ jobs:
 
           # Package macOS
           mkdir -p slp-macos-universal/bin slp-macos-universal/lib slp-macos-universal/include slp-macos-universal/src
+          cp README.md LICENSE THIRD_PARTY_NOTICES.md slp-macos-universal/
           cp bin/slp bin/slp_fmt bin/slpd bin/bench_slp slp-macos-universal/bin/
           cp bin/libslp.a slp-macos-universal/lib/
           cp dist/slp.h slp-macos-universal/include/

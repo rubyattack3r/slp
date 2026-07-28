@@ -13,6 +13,22 @@
 #ifndef _WIN32
 #include <unistd.h>
 #include <regex.h>
+#else
+#include "platform/regex/regex.h"
+#endif
+
+#ifdef _WIN32
+#define SLP_REGEX_COMPILE(vm, regex, pattern, flags) \
+    slp_regex_compile((vm)->allocator, (regex), (pattern), (flags))
+#define SLP_REGEX_EXECUTE(regex, text, count, matches, flags) \
+    slp_regex_execute((regex), (text), (count), (matches), (flags))
+#define SLP_REGEX_FREE(regex) slp_regex_free((regex))
+#else
+#define SLP_REGEX_COMPILE(vm, regex, pattern, flags) \
+    regcomp((regex), (pattern), (flags))
+#define SLP_REGEX_EXECUTE(regex, text, count, matches, flags) \
+    regexec((regex), (text), (count), (matches), (flags))
+#define SLP_REGEX_FREE(regex) regfree((regex))
 #endif
 
 static void *vm_default_alloc(void *ptr, size_t size, void *ud) {
@@ -964,6 +980,15 @@ static char *translate_sleep_regex(SlpVM *vm, const char *pattern) {
     bool deferred_class_hyphen = false;
 
     for (size_t i = 0; i < length; i++) {
+        /* Sleep accepts inline DOTALL mode. POSIX ERE already lets a dot
+         * match newlines, so consume the flag before handing the pattern to
+         * regcomp(). */
+        if (i == 0 && length >= 4 &&
+            pattern[0] == '(' && pattern[1] == '?' &&
+            pattern[2] == 's' && pattern[3] == ')') {
+            i = 3;
+            continue;
+        }
         char current = pattern[i];
         if (current == '\\' && i + 1 < length) {
             char escaped = pattern[++i];
@@ -1103,22 +1128,6 @@ int slp_vm_regex_find(SlpVM *vm, const char *text, const char *pattern,
         return -1;
     }
 
-#ifdef _WIN32
-    /* The Windows build currently has no POSIX regex provider. Preserve exact
-       and literal-search behavior instead of silently accepting a non-match. */
-    const char *found = full_match
-                            ? (strcmp(text, pattern) == 0 ? text : NULL)
-                            : strstr(text + start, pattern);
-    if (!found) {
-        set_regex_matches(vm, NULL);
-        return -1;
-    }
-    int absolute_start = (int)(found - text);
-    if (match_end)
-        *match_end = absolute_start + (int)strlen(pattern);
-    set_regex_matches(vm, slp_vm_new_array(vm));
-    return absolute_start;
-#else
     char *translated = translate_sleep_regex(vm, pattern);
     if (!translated) {
         set_regex_matches(vm, NULL);
@@ -1126,7 +1135,8 @@ int slp_vm_regex_find(SlpVM *vm, const char *text, const char *pattern,
     }
 
     regex_t regex;
-    int compile_result = regcomp(&regex, translated, REG_EXTENDED);
+    int compile_result =
+        SLP_REGEX_COMPILE(vm, &regex, translated, REG_EXTENDED);
     SLP_FREE(vm->allocator, translated);
     if (compile_result != 0) {
         set_regex_matches(vm, NULL);
@@ -1138,7 +1148,9 @@ int slp_vm_regex_find(SlpVM *vm, const char *text, const char *pattern,
     regmatch_t matches[16];
     int flags = start > 0 ? REG_NOTBOL : 0;
     int execute_result =
-        regexec(&regex, text + start, (size_t)group_count + 1, matches, flags);
+        SLP_REGEX_EXECUTE(
+            &regex, text + start, (size_t)group_count + 1,
+            matches, flags);
     bool found = execute_result == 0;
     int absolute_start = -1;
     int absolute_end = -1;
@@ -1152,14 +1164,14 @@ int slp_vm_regex_find(SlpVM *vm, const char *text, const char *pattern,
     }
 
     if (!found) {
-        regfree(&regex);
+        SLP_REGEX_FREE(&regex);
         set_regex_matches(vm, NULL);
         return -1;
     }
 
     SlpObjArray *captures = slp_vm_new_array(vm);
     if (!captures) {
-        regfree(&regex);
+        SLP_REGEX_FREE(&regex);
         set_regex_matches(vm, NULL);
         return -1;
     }
@@ -1179,9 +1191,8 @@ int slp_vm_regex_find(SlpVM *vm, const char *text, const char *pattern,
     }
     set_regex_matches(vm, captures);
     if (match_end) *match_end = absolute_end;
-    regfree(&regex);
+    SLP_REGEX_FREE(&regex);
     return absolute_start;
-#endif
 }
 
 static bool regex_key_equals(const SlpRegexState *state,

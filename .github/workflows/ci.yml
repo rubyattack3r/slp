@@ -10,7 +10,10 @@ on:
       - 'extensions/**'
       - 'deps/**'
       - 'tools/**'
+      - 'scripts/**'
       - 'Makefile'
+      - 'README.md'
+      - 'THIRD_PARTY_NOTICES.md'
       - '.github/workflows/ci.yml'
   pull_request:
     branches: [ "main", "master" ]
@@ -21,7 +24,10 @@ on:
       - 'extensions/**'
       - 'deps/**'
       - 'tools/**'
+      - 'scripts/**'
       - 'Makefile'
+      - 'README.md'
+      - 'THIRD_PARTY_NOTICES.md'
       - '.github/workflows/ci.yml'
 
 jobs:
