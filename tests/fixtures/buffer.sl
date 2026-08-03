@@ -37,7 +37,7 @@ println("Bytes avail: " . available($handle)); # this is 0 for some reason and I
                                                # seems readln and friends disturb the force?
  
                                                # now I know why!! it appears that ops to read unicode
-                                               # chars will take up some of the buffer contents to
+                                               # chars will suck up some of the buffer contents to
                                                # make things more "efficient". 
 
 println(readln($handle)); 

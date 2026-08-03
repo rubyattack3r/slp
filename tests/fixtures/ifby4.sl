@@ -1,6 +1,6 @@
 #
 # weird bug I managed to create with multiple ||'s and &&'s
-# this is to prevent such another mistake
+# this is to prevent such a stupid mistake again
 #
 $text = '/theme /Use';
 
@@ -12,4 +12,3 @@ if ($text ismatch '/dcc send \S+ (.+)' ||
 {
       println("We do have a match, what happens next, I don't know...");
 }
-

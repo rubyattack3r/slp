@@ -178,7 +178,10 @@ make test
 The suite covers the lexer, parser, compiler, VM, garbage collector, standard
 library, formatter, embedding API, and the upstream Sleep fixtures. The
 reference-output fixtures and compatibility ledger live under `tests/` and
-are checked by the normal test run.
+are checked by the normal test run. All 342 upstream scripts and output
+oracles are represented: 227 currently run byte-for-byte through the portable
+SLP runtime, while the remaining 115 have explicit statuses in
+`tests/reference_unverified.tsv`.
 
 Run only the generated-library compile and execution checks with:
 

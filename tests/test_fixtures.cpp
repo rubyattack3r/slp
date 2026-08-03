@@ -96,7 +96,7 @@ TEST_CASE("Parse all .sl fixtures and check error expectations") {
     closedir(d);
   }
 
-  REQUIRE(parsed_count > 300);
+  REQUIRE(parsed_count == 342);
 }
 
 TEST_CASE("Parse runtime error scripts - should have no syntax errors") {
@@ -181,15 +181,11 @@ TEST_CASE("Parse runtime error scripts - should have no syntax errors") {
     closedir(d);
   }
 
-  // We expect to test at least some of the runtime error scripts
-  REQUIRE(tested_count > 0);
+  REQUIRE(tested_count == 9);
+  CHECK(failed_count == 0);
 
   printf("\n=== Runtime Error Scripts Test Results ===\n");
   printf("Total: %d | Passed: %d | Failed: %d\n", tested_count, passed_count, failed_count);
-  printf("Note: Failed tests indicate incomplete parser implementation.\n");
-  printf("      These scripts should parse but may fail at runtime.\n");
-
-  // Don't fail the test case if some scripts don't parse yet
-  // This is informational for now
-  INFO("Runtime error script parsing: ", passed_count, "/", tested_count, " parsed successfully");
+  INFO("Runtime error script parsing: ", passed_count, "/", tested_count,
+       " parsed successfully");
 }

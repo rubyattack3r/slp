@@ -1,5 +1,5 @@
 #
-# Just a bunch of stuff - Old build.xml file actually
+# Just a bunch of crap - Old build.xml file actually
 # I just wanted to see if the parser freaks out real bad when I give it an obviously bad file
 #
 <project name="sleep" default="all" basedir=".">
@@ -92,4 +92,3 @@
     <delete dir="${build}"/>
   </target>
 </project>
-

@@ -25,7 +25,7 @@ $src = fork({
   }
 
   println();
-  println("Writing a massive amount of stuff");
+  println("Writing a massive amount of crap");
 
   println("Pre-Close: Avail for reading from str: " . available($str));
   closef($str);

@@ -7,7 +7,7 @@ println("Aftermath: $var");
 
 push(@temp, "blah");
 push(@temp, "bleh");
-push(@temp, "slew");
+push(@temp, "sluts");
 
 println("Pre print: " . @temp);
 

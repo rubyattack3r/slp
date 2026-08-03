@@ -180,3 +180,93 @@ TEST_CASE("Formatter VM Parity: executing formatted code behaves identically to 
   printf("  [INFO] Formatter verified %d VM integration fixtures for semantic execution parity\n", checked_count);
   REQUIRE(checked_count > 40);
 }
+
+TEST_CASE("Formatter preserves unparenthesized isin operands") {
+  const char *source =
+      "if ('\"' isin @_dotNetAssemblyArgs[$count] || \"'\" isin @_dotNetAssemblyArgs[$count]) {\n"
+      "  $found = 1;\n"
+      "}\n";
+
+  SlpParser parser;
+  slp_parser_init(&parser, source, &formatter_allocator);
+  SlpASTNode *root = slp_parser_parse(&parser);
+  REQUIRE(root != NULL);
+  CHECK_EQ(parser.had_error, false);
+
+  char *formatted = slp_ast_format(root, &formatter_allocator);
+  REQUIRE(formatted != NULL);
+
+  CHECK(strstr(formatted, "isin (@_dotNetAssemblyArgs") == nullptr);
+  CHECK(strstr(formatted, "isin @_dotNetAssemblyArgs[$count]") != nullptr);
+
+  SlpParser reparsed;
+  slp_parser_init(&reparsed, formatted, &formatter_allocator);
+  SlpASTNode *reparsed_root = slp_parser_parse(&reparsed);
+  CHECK_EQ(reparsed.had_error, false);
+  REQUIRE(reparsed_root != NULL);
+
+  slp_parser_free_node(reparsed_root, &formatter_allocator);
+  formatter_realloc(formatted, 0, NULL);
+  slp_parser_free_node(root, &formatter_allocator);
+}
+
+TEST_CASE("Formatter preserves Cobalt-safe isin negation and literal dollars") {
+  const char *source =
+      "if (%jobs[$bid] !is $null && !(\"expected marker:\" isin $text)) {\n"
+      "  touch($bid);\n"
+      "}\n"
+      "println(\"Escaped dollar: value\\$' suffix\");\n";
+
+  SlpParser parser;
+  slp_parser_init(&parser, source, &formatter_allocator);
+  SlpASTNode *root = slp_parser_parse(&parser);
+  REQUIRE(root != NULL);
+  CHECK_EQ(parser.had_error, false);
+
+  char *formatted = slp_ast_format(root, &formatter_allocator);
+  REQUIRE(formatted != NULL);
+
+  CHECK(strstr(formatted,
+               "!(\"expected marker:\" isin $text)") !=
+        nullptr);
+  CHECK(strstr(formatted, "!\"expected marker:") == nullptr);
+  CHECK(strstr(formatted, "value\\$' suffix") != nullptr);
+  CHECK(strstr(formatted, "\"$'\"") == nullptr);
+
+  SlpParser reparsed;
+  slp_parser_init(&reparsed, formatted, &formatter_allocator);
+  SlpASTNode *reparsed_root = slp_parser_parse(&reparsed);
+  CHECK_EQ(reparsed.had_error, false);
+  REQUIRE(reparsed_root != NULL);
+
+  slp_parser_free_node(reparsed_root, &formatter_allocator);
+  formatter_realloc(formatted, 0, NULL);
+  slp_parser_free_node(root, &formatter_allocator);
+}
+
+TEST_CASE("Formatter preserves the parsed-literal concatenation scalar") {
+  const char *source =
+      "$path = \"\\\\\\\\\" . $+ . $host . $+ . \"\\\\\" . $+ . $scope;\n";
+
+  SlpParser parser;
+  slp_parser_init(&parser, source, &formatter_allocator);
+  SlpASTNode *root = slp_parser_parse(&parser);
+  REQUIRE(root != NULL);
+  CHECK_EQ(parser.had_error, false);
+
+  char *formatted = slp_ast_format(root, &formatter_allocator);
+  REQUIRE(formatted != NULL);
+
+  CHECK(strstr(formatted, ". $+ . $host . $+ .") != nullptr);
+  CHECK(strstr(formatted, "\"$+\"") == nullptr);
+
+  SlpParser reparsed;
+  slp_parser_init(&reparsed, formatted, &formatter_allocator);
+  SlpASTNode *reparsed_root = slp_parser_parse(&reparsed);
+  CHECK_EQ(reparsed.had_error, false);
+  REQUIRE(reparsed_root != NULL);
+
+  slp_parser_free_node(reparsed_root, &formatter_allocator);
+  formatter_realloc(formatted, 0, NULL);
+  slp_parser_free_node(root, &formatter_allocator);
+}

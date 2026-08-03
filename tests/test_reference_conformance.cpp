@@ -10,6 +10,8 @@ extern "C" {
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -61,6 +63,59 @@ static std::vector<std::string> supported_fixtures() {
     return names;
 }
 
+struct UnverifiedFixture {
+    std::string name;
+    std::string status;
+    std::string reason;
+};
+
+static std::vector<UnverifiedFixture> unverified_fixtures() {
+    std::vector<UnverifiedFixture> fixtures;
+    std::string contents = read_file("tests/reference_unverified.tsv");
+    size_t cursor = 0;
+    while (cursor < contents.size()) {
+        size_t end = contents.find('\n', cursor);
+        if (end == std::string::npos) end = contents.size();
+        std::string line = contents.substr(cursor, end - cursor);
+        while (!line.empty() && line.back() == '\r') line.pop_back();
+        size_t first = line.find_first_not_of(" \t");
+        if (first != std::string::npos && line[first] != '#') {
+            line = line.substr(first);
+            size_t first_tab = line.find('\t');
+            size_t second_tab = first_tab == std::string::npos
+                                    ? std::string::npos
+                                    : line.find('\t', first_tab + 1);
+            UnverifiedFixture fixture;
+            if (first_tab != std::string::npos &&
+                second_tab != std::string::npos) {
+                fixture.name = line.substr(0, first_tab);
+                fixture.status =
+                    line.substr(first_tab + 1, second_tab - first_tab - 1);
+                fixture.reason = line.substr(second_tab + 1);
+            }
+            fixtures.push_back(fixture);
+        }
+        cursor = end + 1;
+    }
+    return fixtures;
+}
+
+static std::vector<std::string> fixture_names(const char *directory_path) {
+    std::vector<std::string> names;
+    DIR *directory = opendir(directory_path);
+    if (!directory) return names;
+
+    struct dirent *entry;
+    while ((entry = readdir(directory)) != NULL) {
+        const char *extension = strrchr(entry->d_name, '.');
+        if (extension && strcmp(extension, ".sl") == 0)
+            names.push_back(entry->d_name);
+    }
+    closedir(directory);
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
 struct OutputCapture {
     std::string output;
     std::string errors;
@@ -83,19 +138,34 @@ static void capture_error(void *user_data, int line, const char *message) {
 } // namespace
 
 TEST_CASE("Reference conformance ledger contains the complete upstream oracle") {
-    DIR *directory = opendir("tests/reference_output");
-    REQUIRE(directory != NULL);
+    std::vector<std::string> sources = fixture_names("tests/fixtures");
+    std::vector<std::string> outputs = fixture_names("tests/reference_output");
+    std::vector<std::string> supported = supported_fixtures();
+    std::vector<UnverifiedFixture> unverified = unverified_fixtures();
 
-    int output_count = 0;
-    struct dirent *entry;
-    while ((entry = readdir(directory)) != NULL) {
-        const char *extension = strrchr(entry->d_name, '.');
-        if (extension && strcmp(extension, ".sl") == 0)
-            output_count++;
+    REQUIRE(sources.size() == 342);
+    CHECK(outputs == sources);
+    CHECK(supported.size() == 227);
+    CHECK(unverified.size() == 115);
+
+    std::set<std::string> source_set(sources.begin(), sources.end());
+    std::set<std::string> ledger;
+    for (size_t i = 0; i < supported.size(); i++) {
+        CAPTURE(supported[i]);
+        CHECK(ledger.insert(supported[i]).second);
     }
-    closedir(directory);
 
-    CHECK(output_count == 342);
+    const std::set<std::string> valid_statuses = {
+        "execution-error", "fixture-cwd", "output-mismatch", "timeout"};
+    for (size_t i = 0; i < unverified.size(); i++) {
+        CAPTURE(unverified[i].name);
+        CHECK(!unverified[i].name.empty());
+        CHECK(valid_statuses.count(unverified[i].status) == 1);
+        CHECK(!unverified[i].reason.empty());
+        CHECK(ledger.insert(unverified[i].name).second);
+    }
+
+    CHECK(ledger == source_set);
 }
 
 TEST_CASE("Supported fixtures match official Sleep 2.1 output byte-for-byte") {

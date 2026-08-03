@@ -42,6 +42,7 @@ callccpcon.sl
 callccr.sl
 cache.sl
 closure.sl
+closureindex.sl
 closurekvp.sl
 cmdline.sl
 compile_cl.sl
@@ -77,6 +78,7 @@ find.sl
 fob.sl
 for.sl
 forany.sl
+foreach.sl
 foreachrecurse.sl
 foreachrem.sl
 fork.sl
@@ -92,10 +94,12 @@ funchandle.sl
 graph.sl
 hash.sl
 hash2.sl
+hash3.sl
 hashambig.sl
 hashself.sl
 hexbites.sl
 hfreeze.sl
+if.sl
 ifand.sl
 ifand2.sl
 ifarray.sl
@@ -207,6 +211,7 @@ sublist.sl
 sumtest.sl
 sync.sl
 taint11.sl
+tcatch.sl
 tcatch2.sl
 tcatchex.sl
 tracebr.sl

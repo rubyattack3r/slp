@@ -1,28 +1,27 @@
 # test some stuff with if statements...
 
-sub test
+sub sluts
 {
    if ($1 eq "a" || $1 eq "d")
    {
-      return "value1";
+      return "skanks";
    }
 
    if ($1 eq "b")
    {
-      return "value2";
+      return "sluts";
    }
 
    if ($1 eq "c")
    {
-      return "value3";
+      return "whores";
    }
  
-   return "value4";
+   return "bitches";
 }
 
-printf("a: " . test("a"));
-printf("b: " . test("b")); # I'm another comment
-printf("c: " . test("c"));
-printf("d: " . test("d"));
-printf("e: " . test("e"));
-
+printf("a: " . sluts("a"));
+printf("b: " . sluts("b")); # ho ho I'm another comment
+printf("c: " . sluts("c"));
+printf("d: " . sluts("d"));
+printf("e: " . sluts("e"));

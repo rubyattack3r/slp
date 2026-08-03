@@ -4,26 +4,26 @@
 
 sub phoenetic
 {
-   this('$bad');
+   this('$evil');
 
    $this["a"] = "alpha";
    $this["b"] = "bravo";
    $this["c"] = "charlie";
    $this["d"] = "delta";   
 
-   $bad = "bad test!!!";
+   $evil = "evil test!!!";
 
-   println("bad test --- $bad");
+   println("evil test --- $evil");
 
    yield; 
 
-   println("yeap, bad is now $bad");
+   println("yeap, evil is now $evil");
 }
 
 phoenetic(); # set everything up please..
 
 println("a    is: " . &phoenetic["a"]);
-println("bad is: " . &phoenetic['$bad']);
+println("evil is: " . &phoenetic['$evil']);
 
-&phoenetic['$bad'] = "oooh, changes... eee";
+&phoenetic['$evil'] = "oooh, changes... eee";
 phoenetic();

@@ -79,13 +79,12 @@ println("Test: $temp");
 println("-" x 40);
 
 #
-# I hate these unicode strings...
+# I hate these stupid UTF strings... blah
 #
 
-$data = pack('UUU', "this string is lame", "this string is also lame", "this string is even lamer");
+$data = pack('UUU', "this string is lame as hell", "this string is also lame", "this string is even lamer");
 ($s1, $s2, $s3) = unpack('UUU', $data);
 
 println("1: $s1");
 println("2: $s2");
 println("3: $s3");
-

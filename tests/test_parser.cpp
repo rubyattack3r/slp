@@ -332,7 +332,7 @@ TEST_CASE("Parser: string with too many interpolations errors, no overflow") {
   if (root) slp_parser_free_node(root, &test_allocator);
 }
 
-TEST_CASE("Parser rejects newlines used as statement terminators") {
+TEST_CASE("Parser accepts Cobalt-style newline statement terminators") {
   const char *source = 
     "local('$a')\n"
     "$a = 1\n"
@@ -344,14 +344,28 @@ TEST_CASE("Parser rejects newlines used as statement terminators") {
   slp_parser_init(&parser, source, &test_allocator);
 
   SlpASTNode *root = slp_parser_parse(&parser);
-  CHECK(parser.had_error);
-  REQUIRE(parser.error_message != nullptr);
-  CHECK_EQ(
-      strcmp(parser.error_message,
-             "Missing terminator"),
-      0);
-  if (root)
-    slp_parser_free_node(root, &test_allocator);
+  CHECK_FALSE(parser.had_error);
+  REQUIRE(root != nullptr);
+  slp_parser_free_node(root, &test_allocator);
+}
+
+TEST_CASE("Parser accepts omitted terminators in CNA command and alias bodies") {
+  const char *source =
+      "alias remotepipelist {\n"
+      "  inline(&RemotePipeList_invoke)\n"
+      "}\n"
+      "sub nettime {\n"
+      "  local('$args $name')\n"
+      "  $name = iff(-istrue $2, $2, \"\");\n"
+      "  println($name)\n"
+      "}\n";
+  SlpParser parser;
+  slp_parser_init(&parser, source, &test_allocator);
+
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_FALSE(parser.had_error);
+  REQUIRE(root != nullptr);
+  slp_parser_free_node(root, &test_allocator);
 }
 
 TEST_CASE("Parser rejects omitted argument commas") {
@@ -435,21 +449,17 @@ TEST_CASE("Parser: rejects comma-less function call arguments") {
     slp_parser_free_node(root, &test_allocator);
 }
 
-TEST_CASE("Parser: newlines do not replace statement terminators") {
+TEST_CASE("Parser: newlines separate adjacent assignments") {
   const char *source = "$x = 5\n$y = 10\n";
   SlpParser parser;
   slp_parser_init(&parser, source, &test_allocator);
 
   SlpASTNode *root = slp_parser_parse(&parser);
-  CHECK(parser.had_error);
-  REQUIRE(parser.error_message != nullptr);
-  CHECK_EQ(
-      strcmp(parser.error_message,
-             "Missing terminator"),
-      0);
-
-  if (root)
-    slp_parser_free_node(root, &test_allocator);
+  CHECK_FALSE(parser.had_error);
+  REQUIRE(root != nullptr);
+  REQUIRE(root->type == SLP_AST_SCRIPT);
+  CHECK_EQ(root->as.block.count, 2);
+  slp_parser_free_node(root, &test_allocator);
 }
 
 TEST_CASE("Parser: return keyword on newline restricts argument consumption") {
