@@ -5,6 +5,7 @@ uNF
 0r5ewr5
 4567
 blah
+you suck
 000
 ...');
 closef($buffer);

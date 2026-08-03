@@ -23,7 +23,7 @@ $src = fork({
   }
 
   println();
-  println("Writing a massive amount of stuff");
+  println("Writing a massive amount of crap");
 
   writeb($server, $str);
   closef($server);

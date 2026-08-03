@@ -14,7 +14,7 @@ sub test
    }
 } 
 
-sub test2
+sub sluts
 {
    println("Arg1: $1 \nArg2: $2 \nArg3: $3");
 }
@@ -23,6 +23,6 @@ test("a", "b", "c", "d", "e", "f", "g", "h", "i", "j");
 test(1, 2, 3, 4, 5);
 test();
 
-test2(1, 2, 3, 4, 5);
-test2("a", "b", "c", "d");
-test2();
+sluts(1, 2, 3, 4, 5);
+sluts("a", "b", "c", "d");
+sluts();

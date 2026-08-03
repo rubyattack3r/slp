@@ -5,7 +5,7 @@
 %hash = hash(
           key    => "hello world!@",
           blah   => "bleh",
-          stuff => 3.0 * (245 % 45),
+          skanks => 3.0 * (245 % 45),
           "old style=this is a literal string"
         );
 

@@ -2,23 +2,23 @@
 # Test the built in warning(s) mechanism...
 #
 
-sub test1
+sub sluts
 {
    printf("I like ice cream");
    printz("Testing...");
 }
 
-suy test2
+suy skanks
 {
    printf("Skanalicious");
 }
 
 for ($x = 0; $x < 3; $x++)
 {
-   test1();
+   sluts();
 }
 
-test2();
+skanks();
 
 $z = $z *8 30; # 00pZ I made a typo...  *8 will be interpreted as an operator, doh!@
 

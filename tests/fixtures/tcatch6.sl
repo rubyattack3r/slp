@@ -6,7 +6,7 @@ println("uNF... basic cas3 baby!@%");
 sub foo
 {
    $x = 1 + 2;
-   println("In the slew() function...");
+   println("In the sluts() function...");
    if ($x == 3)
    {
       bar();
@@ -24,6 +24,6 @@ sub bar
 $xyz = "nothing wrong here, I promise!@#";
 println($xyz);
 $mmm = { foo(); };
-[$mmm test: "this is a Haphazard Object Extensions for Sleep call"];
+[$mmm test: "this is a HOES call"];
 println("More after foo");
 println("The beat does go on...");

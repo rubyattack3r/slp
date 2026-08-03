@@ -13,11 +13,14 @@ sub my_compare
    return -1;
 }
 
-push(@data, "stuff");
+push(@data, "sluts");
 push(@data, "this");
 push(@data, "is");
 push(@data, "a");
+push(@data, "freaking");
 push(@data, "test");
+push(@data, "bish");
+push(@data, "whorez");
 
 sorta(@data);
 
@@ -28,5 +31,5 @@ foreach $var (@data)
 
 if ('*!*@*.aol.com' iswm "`butane!lamer@irc.aol.com")
 {
-   printf("lamah");
+   printf("Freaking lamah");
 }

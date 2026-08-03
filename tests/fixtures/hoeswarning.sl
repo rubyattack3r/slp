@@ -1,5 +1,5 @@
 #
-# Make sure "Haphazard Object Extensions for Sleep" is catching java exceptions correctly...
+# Make sure HOES is catching java exceptions correctly...
 #
 $long  = [Long    valueOf: "4782378478324474fjjsdfjsdjkfjk3"];
 

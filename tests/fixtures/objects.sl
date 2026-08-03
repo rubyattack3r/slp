@@ -1,5 +1,5 @@
 #
-# Tests of some "Haphazard Object Extensions for Sleep" features...
+# Tests of some HOES features...
 #
 
 [[System out] println: "this is a test" ];

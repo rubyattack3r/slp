@@ -1,0 +1,118 @@
+# Official Sleep fixtures not yet claimed as portable SLP conformance passes.
+#
+# filename<TAB>status<TAB>reason
+argerr.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+asis.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+backtickin.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+bareword.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+binary.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+brokendec.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+btest.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+byteconvert.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+byteconvert2.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+callcc_tcatch.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+callccfork.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+callccfreeze.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+cast.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+castbug.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+charcheck.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+chdir.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+checksum.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+clazz.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+clmistake.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+closure2.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+concaterrs.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+connpipe.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+convertds.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+convertds2.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+convertds3.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+convertds4.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+dataio.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+debug64.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+debugce.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+debugproxy.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+digest.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+errors1.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+errors2.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+errors3.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+errors4.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+errors5.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+fe_generatordb.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+forkdl.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+forker.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+forkshare.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+genfun.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+hash4.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+hoeserror.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+hoeswarning.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+identity2.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+imperror.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+impfrom.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+impfrom2.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+impfrom3.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+impfrom4.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+incit2.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+incit3.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+include.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+include2.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+inlineb.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+inlinelocalcallcc.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+iswm.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+iswm2.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+iswm3.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+iternotrace.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+keyvalueerr.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+longip.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+makebadscript.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+mapasc.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+matcher.sl	timeout	Does not terminate within the isolated three-second conformance audit.
+megaio.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+multih.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+native_arrays.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+newInstance.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+noterm.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+noterm2.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+pep255.sl	timeout	Does not terminate within the isolated three-second conformance audit.
+probug.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+process.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+proxy.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+readb2.sl	fixture-cwd	Matches the oracle only when executed from the upstream tests directory.
+remove.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+scalar.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+scalref.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+setField2.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+setfield.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+setfield3.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+sillysyntax.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+skew.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+slist3.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+sort.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+srand.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+taint1.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+taint10.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+taint2.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+taint3.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+taint4.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+taint5.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+taint6.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+taint7.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+taint8.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+taint9.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+tcatch3.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+tcatch4.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+tcatch5.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+tcatch6.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+testfield.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+trace.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+tracepo.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+trans.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+types.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+unicodeseq.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+use.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+use2.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+useerr.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+warn.sl	execution-error	Does not complete successfully under the current portable SLP runtime.
+warn2.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+while2.sl	fixture-cwd	Matches the oracle only when executed from the upstream tests directory.
+writeobj.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.
+wrong.sl	output-mismatch	Completes, but stdout does not match the official Sleep oracle byte-for-byte.

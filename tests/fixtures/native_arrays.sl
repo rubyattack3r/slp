@@ -10,6 +10,7 @@ if ([Arrays equals: @a, @b])
    println("A: The two arrays are equal...");
 }
 
+
 # test 2...  ensure everything is autocast to a double
 
 @a = array(3.0, 4.0, 5.0, 6.0, 7.0);
@@ -52,10 +53,10 @@ if (![Arrays equals: @a, @b]) # see the exclamation point, phear the exclamation
 # Testing the cast function...
 #
 
-@a = array("item0", "item1", "item2", "item3", "item4", "item5", "item6");
+@a = array("sluts", "whores", "skanks", "harlets", "any ex-girlfriend", "hoe", "garden tool");
 @a = sorta(@a); # oops gotta make sure its sorted...
 
-println("Lets do a search: " . [Arrays binarySearch: cast(@a), "item2"]);
+println("Lets do a search: " . [Arrays binarySearch: cast(@a), "skanks"]);
 
 #
 # another simple cast...
@@ -83,7 +84,7 @@ println('<--------------------------------------------------->');
 
 for ($x = 0; $x < 2; $x++)
 {
-   $array = [Array get: $temp, $x]; # this is all we need because Sleep will auto convert any item5S function
+   $array = [Array get: $temp, $x]; # this is all we need because Sleep will auto convert any HOES function
                                     # returning an array into a Sleep array of however many dimensions
 
    for ($y = 0; $y < 2; $y++)
@@ -136,4 +137,3 @@ for ($x = 0; $x < [Array getLength: $temp]; $x++)
 {
    println("temp[ $+ $x $+ ] = " . [Array get: $temp, $x]);
 }
-
