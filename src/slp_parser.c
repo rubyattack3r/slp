@@ -1229,9 +1229,17 @@ static SlpASTNode *expression(SlpParser *parser) {
 
 static SlpASTNode *expression_statement(SlpParser *parser) {
   SlpASTNode *expr = expression(parser);
-  if (!match(parser, SLP_TOKEN_SEMICOLON) &&
-      !check(parser, SLP_TOKEN_EOF))
+  if (match(parser, SLP_TOKEN_SEMICOLON)) {
+    // Explicit terminator.
+  } else if (check(parser, SLP_TOKEN_RIGHT_BRACE) ||
+             check(parser, SLP_TOKEN_EOF)) {
+    // A terminator is optional immediately before a block boundary or EOF.
+  } else if (parser->current.line > parser->previous.line) {
+    // Cobalt Strike's Sleep dialect permits a newline to terminate a
+    // statement when no explicit semicolon is present.
+  } else {
     error(parser, "Missing terminator");
+  }
   return expr;
 }
 

@@ -57,6 +57,7 @@ static PrecedenceLevel get_node_precedence(SlpASTNode *node) {
     if (len == 3 && memcmp(op, "and", 3) == 0) return AST_PREC_LAND;
     if (len == 2 && memcmp(op, "or", 2) == 0) return AST_PREC_LOR;
     if (len == 2 && memcmp(op, "in", 2) == 0) return AST_PREC_COMPARISON;
+    if (len == 4 && memcmp(op, "isin", 4) == 0) return AST_PREC_EQUALITY;
     if (len == 2 && memcmp(op, "is", 2) == 0) return AST_PREC_EQUALITY;
     if (len == 2 && memcmp(op, "eq", 2) == 0) return AST_PREC_EQUALITY;
     if (len == 2 && memcmp(op, "ne", 2) == 0) return AST_PREC_EQUALITY;
@@ -1167,6 +1168,10 @@ static void format_node(SlpASTNode *node, SlpStringBuffer *buffer,
   }
 
   case SLP_AST_SCALAR: {
+    if (node->as.string_val[0] == '+' && node->as.string_val[1] == '\0') {
+      slp_string_buffer_append_string(buffer, "$+", 2);
+      break;
+    }
     bool simple_name = true;
     for (const char *cursor = node->as.string_val; *cursor; cursor++) {
       if (!((*cursor >= 'a' && *cursor <= 'z') ||
