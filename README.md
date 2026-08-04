@@ -2,11 +2,11 @@
 
 SLP is a small, native C99 implementation of the
 [Sleep programming language](https://sleep.dashnine.org/) designed for
-embedding in C applications. It has no external runtime dependencies. Features
-that require a real JVM, such as loading arbitrary Java classes, JARs, or
-`Loadable` extensions, are not supported.
+embedding in C applications. It has no external runtime dependencies and does
+not include a JVM, so Java classes, JARs, and `Loadable` extensions are outside
+its scope.
 
-## Build it
+## Build
 
 You need `make` and a C99 compiler. The runtime and tools are C-only; a C++
 compiler is required only for the doctest-based test suite:
@@ -59,13 +59,38 @@ The usual flow is:
 4. Run code with `slp_vm_interpret()`.
 5. Free the VM.
 
-All allocations performed by SLP's core—including its bundled Windows regex
-backend—go through the host-provided `SlpAllocator`, allowing the application
-to track, limit, or customize SLP's memory use. Platform C library routines
-may perform their own internal allocations.
+SLP's core allocations go through the host-provided `SlpAllocator`, allowing
+the application to track, limit, or customize SLP's memory use. Platform C
+library routines may perform their own internal allocations.
 
 Include `slp_embed.h` when native functions need to read Sleep arguments or
-retain and call a Sleep closure:
+retain and call a Sleep closure.
+
+Here is a minimal native function using the recommended `SlpArgs` API. The
+`allocator` must be initialized by the host application:
+
+```c
+static SlpValue host_add(
+    SlpVM *vm, SlpValue *values, int count) {
+    SlpArgs args;
+    int left = 0;
+    int right = 0;
+
+    slp_args_init(&args, vm, values, count);
+    if (!slp_args_next_int(&args, &left) ||
+        !slp_args_next_int(&args, &right))
+        return SLP_NULL_VAL;
+
+    return SLP_NUM_VAL((double)(left + right));
+}
+
+SlpVM *vm = slp_vm_new(&allocator);
+slp_vm_register_native(vm, "host_add", host_add);
+slp_vm_interpret(vm, "$result = host_add(2, 3);");
+slp_vm_free(vm);
+```
+
+To retain and call a Sleep closure from native code:
 
 ```c
 static SlpValue call_callback(
@@ -90,13 +115,43 @@ argument. `SlpCallable` keeps a closure alive across garbage collections and
 must be released before its VM is freed. The embedding header also provides
 value conversion and VM-owned array/hash helpers.
 
-`slp_args_unpack()` remains available for existing format-string-based native
-functions, but new integrations should use `SlpArgs`.
+For native function arguments, use one of these two APIs:
+
+- `SlpArgs` — the recommended API. Initialize a reader and consume arguments
+  with typed functions such as `slp_args_next_string()` and
+  `slp_args_next_int()`. It avoids variadic output-pointer mismatches and makes
+  each conversion explicit.
+- `slp_args_unpack()` — a compatibility convenience for small native functions
+  with fixed signatures. It maps a format string to variadic output pointers;
+  new integrations should generally prefer `SlpArgs`.
+
+The supported `slp_args_unpack()` format codes are:
+
+| Code | Output argument | Behavior |
+| --- | --- | --- |
+| `s` | `const char **` | Reads a string; Sleep null produces `NULL`. |
+| `s#` | `const char **`, `int *` | Reads a string and its byte length. |
+| `i` | `int *` | Reads a numeric value with integer coercion. |
+| `l` | `int64_t *` | Reads an integer or long value. |
+| `d` | `double *` | Reads a numeric value. |
+| `b` | `bool *` | Reads Sleep truthiness. |
+| `O` | `SlpValue *` | Reads a generic Sleep value. |
+| `O!` | `SlpObjType`, typed pointer | Reads an array or hash of the requested type. |
+| optional marker | — | Makes all following arguments optional. |
+
+Whitespace in the format string is ignored. Use a vertical bar (`|`) to make
+the remaining arguments optional. For example:
+
+```c
+slp_args_unpack(
+    vm, values, count, "s i | b",
+    &name, &limit, &enabled);
+```
 
 See `tests/test_embed.cpp` and `tests/test_embed_callable.cpp` for complete,
 working examples.
 
-## Use the amalgamation
+## Amalgamation
 
 Generate a copyable header/source pair:
 
@@ -147,7 +202,7 @@ the application does not need the standard library, omit
 
 Windows builds must also link `ws2_32`.
 
-## Other tools
+## Tools
 
 Format a script to stdout, update it in place, or write another file:
 
@@ -169,18 +224,15 @@ Run the benchmark:
 make bench
 ```
 
-## Test it
+## Test
 
 ```sh
 make test
 ```
 
 The suite covers the lexer, parser, compiler, VM, garbage collector, standard
-library, formatter, embedding API, and the upstream Sleep fixtures. The
-reference-output fixtures and compatibility ledger live under `tests/` and
-are checked by the normal test run. All 342 upstream scripts and output
-oracles are represented: 227 currently run byte-for-byte through the portable
-SLP runtime, while the remaining 115 have explicit statuses in
+library, formatter, embedding API, and upstream Sleep fixtures. Compatibility
+details for the upstream fixtures are tracked under `tests/`, including
 `tests/reference_unverified.tsv`.
 
 Run only the generated-library compile and execution checks with:
@@ -188,11 +240,6 @@ Run only the generated-library compile and execution checks with:
 ```sh
 make test-amalgamation
 ```
-
-SLP implements portable Sleep behavior directly in C. It supports native
-equivalents for the Java collection and wrapper behavior used by Sleep
-scripts, but it does not include a JVM. Loading arbitrary Java classes, JARs,
-or Java `Loadable` extensions is therefore outside its scope.
 
 ## Project layout
 
