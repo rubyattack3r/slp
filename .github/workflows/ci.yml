@@ -3,32 +3,8 @@ name: CI
 on:
   push:
     branches: [ "main", "master" ]
-    paths:
-      - 'src/**'
-      - 'include/**'
-      - 'tests/**'
-      - 'extensions/**'
-      - 'deps/**'
-      - 'tools/**'
-      - 'scripts/**'
-      - 'Makefile'
-      - 'README.md'
-      - 'THIRD_PARTY_NOTICES.md'
-      - '.github/workflows/ci.yml'
   pull_request:
     branches: [ "main", "master" ]
-    paths:
-      - 'src/**'
-      - 'include/**'
-      - 'tests/**'
-      - 'extensions/**'
-      - 'deps/**'
-      - 'tools/**'
-      - 'scripts/**'
-      - 'Makefile'
-      - 'README.md'
-      - 'THIRD_PARTY_NOTICES.md'
-      - '.github/workflows/ci.yml'
 
 jobs:
   test-cross-platform:
