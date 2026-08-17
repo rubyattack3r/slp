@@ -5646,7 +5646,7 @@ static SlpValue builtin_consume(
 static SlpValue builtin_writeb(SlpVM *vm, SlpValue *args, int argc) {
     if (argc < 2 || !SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_IO_HANDLE ||
         !SLP_IS_OBJ(args[1]) || SLP_OBJ_TYPE(args[1]) != SLP_OBJ_STRING) {
-        return SLP_BOOL_VAL(false);
+        return SLP_NULL_VAL;
     }
     SlpObjIOHandle *h = SLP_AS_IO_HANDLE(args[0]);
     SlpObjString *str = SLP_AS_STRING(args[1]);
@@ -5671,7 +5671,10 @@ static SlpValue builtin_writeb(SlpVM *vm, SlpValue *args, int argc) {
         written = (int)send(h->socket_fd, str->chars, str->length, 0);
 #endif
     }
-    return SLP_BOOL_VAL(written > 0);
+    /* Sleep treats binary writes as procedures. Callers observe I/O failures
+     * through checkError rather than a boolean status return. */
+    (void)written;
+    return SLP_NULL_VAL;
 }
 
 static SlpValue builtin_closef(SlpVM *vm, SlpValue *args, int argc) {
@@ -5771,10 +5774,10 @@ static SlpValue builtin_bread(SlpVM *vm, SlpValue *args, int argc) {
 
 static SlpValue builtin_bwrite(SlpVM *vm, SlpValue *args, int argc) {
     if (argc < 2 || !SLP_IS_OBJ(args[0]) || SLP_OBJ_TYPE(args[0]) != SLP_OBJ_IO_HANDLE) {
-        return SLP_BOOL_VAL(false);
+        return SLP_NULL_VAL;
     }
     SlpValue packed = builtin_pack(vm, args + 1, argc - 1);
-    if (SLP_IS_NULL(packed)) return SLP_BOOL_VAL(false);
+    if (SLP_IS_NULL(packed)) return SLP_NULL_VAL;
     
     SlpValue write_args[2] = {args[0], packed};
     return builtin_writeb(vm, write_args, 2);

@@ -308,7 +308,7 @@ TEST_CASE("stdlib memory buffers support binary and line IO after close") {
         vm,
         "$buffer = allocate(32);"
         "println($buffer, 'one');"
-        "writeb($buffer, \"two\\n\");"
+        "$writeb_result = writeb($buffer, \"two\\n\");"
         "$before_close = available($buffer);"
         "closef($buffer);"
         "$after_close = available($buffer);"
@@ -318,6 +318,7 @@ TEST_CASE("stdlib memory buffers support binary and line IO after close") {
         "@lines = readAll($buffer);") == SLP_OK);
 
     CHECK(SLP_IS_NULL(get_stdlib_global(vm, "$before_close")));
+    CHECK(SLP_IS_NULL(get_stdlib_global(vm, "$writeb_result")));
     CHECK(slp_value_as_number(
               get_stdlib_global(vm, "$after_close")) == 8.0);
     CHECK(std::strcmp(
@@ -327,6 +328,25 @@ TEST_CASE("stdlib memory buffers support binary and line IO after close") {
     REQUIRE(lines->count == 2);
     CHECK(std::strcmp(SLP_AS_STRING(lines->elements[0])->chars, "one") == 0);
     CHECK(std::strcmp(SLP_AS_STRING(lines->elements[1])->chars, "two") == 0);
+
+    slp_vm_free(vm);
+}
+
+TEST_CASE("stdlib binary write procedures return null like Sleep") {
+    SlpVM *vm = new_stdlib_vm();
+    REQUIRE(vm != nullptr);
+
+    REQUIRE(slp_vm_interpret(
+        vm,
+        "$buffer = allocate(8);"
+        "$writeb_result = writeb($buffer, 'A');"
+        "$bwrite_result = bwrite($buffer, 'B', 66);"
+        "closef($buffer);") == SLP_OK);
+
+    CHECK(SLP_IS_NULL(
+        get_stdlib_global(vm, "$writeb_result")));
+    CHECK(SLP_IS_NULL(
+        get_stdlib_global(vm, "$bwrite_result")));
 
     slp_vm_free(vm);
 }

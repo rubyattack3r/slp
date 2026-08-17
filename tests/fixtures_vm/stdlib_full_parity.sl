@@ -130,7 +130,8 @@ assert sizeof(%(a => 1)) == 1;
 # 8. File I/O & eof
 $h = openf(">temp_parity_test.txt");
 assert $h isa "io_handle";
-assert writeb($h, "Hello Parity World\n") == true;
+$write_result = writeb($h, "Hello Parity World\n");
+assert $write_result is $null;
 closef($h);
 
 $h2 = openf("temp_parity_test.txt");
