@@ -189,8 +189,6 @@ static int is_short_instruction(uint8_t op) {
     case OP_FOREACH_NEXT_VALUE:
     case OP_BUILD_ARRAY:
     case OP_BUILD_HASH:
-    case OP_BRIDGE_REGISTER:
-    case OP_IMPORT:
     case OP_BACKTICK:
     case OP_CLASS_LITERAL:
         return 1;
@@ -238,6 +236,26 @@ int slp_disasm_instruction(SlpChunk *chunk, int offset, FILE *out) {
         uint8_t idx = chunk->code[offset + 1];
         fprintf(out, " %4d", idx);
         return offset + 2;
+    }
+
+    if (instruction == OP_IMPORT) {
+        uint16_t target = slp_chunk_read_short(chunk, offset + 1);
+        uint16_t path = slp_chunk_read_short(chunk, offset + 3);
+        fprintf(out, " %4d %4d", target, path);
+        return offset + 5;
+    }
+
+    if (instruction == OP_BRIDGE_REGISTER) {
+        uint16_t keyword = slp_chunk_read_short(chunk, offset + 1);
+        uint16_t name_index = slp_chunk_read_short(chunk, offset + 3);
+        uint16_t string_arg = slp_chunk_read_short(chunk, offset + 5);
+        uint16_t condition_count =
+            slp_chunk_read_short(chunk, offset + 7);
+        fprintf(
+            out, " %4d %4d %4d %4d",
+            keyword, name_index, string_arg,
+            condition_count);
+        return offset + 9;
     }
 
     if (is_short_instruction(instruction)) {

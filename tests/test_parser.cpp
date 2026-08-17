@@ -20,6 +20,7 @@ void *test_reallocate_parser(void *memory, size_t newSize, void *userData) {
 }
 
 static SlpAllocator test_allocator = {test_reallocate_parser, NULL};
+
 }
 
 TEST_CASE("Parser initializes correctly") {
@@ -487,5 +488,73 @@ TEST_CASE("Parser: return keyword on newline restricts argument consumption") {
   // The argument of return should be NULL (not $x = 5) because $x is on a new line.
   CHECK(ret_stmt->as.control.value == NULL);
 
+  slp_parser_free_node(root, &test_allocator);
+}
+
+TEST_CASE("Parser: predicate environment shape retains its condition before registration") {
+  SlpParser parser;
+  slp_parser_init(
+      &parser,
+      "when ($enabled == 1 && (2 == 2 || missing())) { return 7; }",
+      &test_allocator);
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_FALSE(parser.had_error);
+  REQUIRE(root != nullptr);
+  REQUIRE(root->as.block.count == 1);
+  SlpASTNode *environment = root->as.block.statements[0];
+  REQUIRE(environment->type == SLP_AST_ENV_BRIDGE);
+  CHECK(strcmp(environment->as.env_bridge.keyword, "when") == 0);
+  CHECK(environment->as.env_bridge.identifier == nullptr);
+  REQUIRE(environment->as.env_bridge.condition != nullptr);
+  CHECK(environment->as.env_bridge.condition->type == SLP_AST_BINOP);
+  REQUIRE(environment->as.env_bridge.body != nullptr);
+
+  SlpASTNode **children = nullptr;
+  size_t child_count = 0;
+  slp_ast_get_children(
+      environment, &children, &child_count, &test_allocator);
+  REQUIRE(child_count == 2);
+  CHECK(children[0] == environment->as.env_bridge.condition);
+  CHECK(children[1] == environment->as.env_bridge.body);
+  slp_ast_free_children(children, &test_allocator);
+  char *formatted = slp_ast_format(root, &test_allocator);
+  REQUIRE(formatted != nullptr);
+  CHECK(strstr(formatted, "when (") != nullptr);
+  CHECK(strstr(formatted, "$enabled == 1") != nullptr);
+  test_allocator.reallocate(
+      formatted, 0, test_allocator.user_data);
+  slp_parser_free_node(root, &test_allocator);
+}
+
+TEST_CASE("Parser: ordinary calls are not predicate environments") {
+  SlpParser parser;
+  slp_parser_init(&parser, "ordinary(1);", &test_allocator);
+
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_FALSE(parser.had_error);
+  REQUIRE(root != nullptr);
+  REQUIRE(root->as.block.count == 1);
+  CHECK(root->as.block.statements[0]->type == SLP_AST_CALL);
+  slp_parser_free_node(root, &test_allocator);
+}
+
+TEST_CASE("Parser: custom infix predicates parse before runtime registration") {
+  SlpParser parser;
+  slp_parser_init(
+      &parser,
+      "1 javaeq 1; [$object toString]; ordinary(1);",
+      &test_allocator);
+
+  SlpASTNode *root = slp_parser_parse(&parser);
+  CHECK_FALSE(parser.had_error);
+  REQUIRE(root != nullptr);
+  REQUIRE(root->as.block.count == 3);
+  SlpASTNode *predicate = root->as.block.statements[0];
+  REQUIRE(predicate->type == SLP_AST_BINOP);
+  CHECK(predicate->as.binop.op.type == SLP_TOKEN_ID);
+  CHECK(predicate->as.binop.op.length == 6);
+  CHECK(strncmp(predicate->as.binop.op.start, "javaeq", 6) == 0);
+  CHECK(root->as.block.statements[1]->type == SLP_AST_OBJ_EXPR);
+  CHECK(root->as.block.statements[2]->type == SLP_AST_CALL);
   slp_parser_free_node(root, &test_allocator);
 }

@@ -274,6 +274,7 @@ SlpObjJavaObject *slp_obj_java_object_new(
     obj->map = NULL;
     obj->fields = NULL;
     obj->value = SLP_NULL_VAL;
+    obj->backend_handle = NULL;
     return obj;
 }
 
@@ -307,6 +308,9 @@ SlpObjArray *slp_obj_array_new(SlpAllocator *alloc) {
     arr->count = 0;
     arr->capacity = 0;
     arr->mutation_version = 0;
+    arr->bridge_identity = 0;
+    arr->bridge_serializing = false;
+    arr->bridge_syncing = false;
     arr->view_source = NULL;
     arr->view_offset = 0;
     arr->view_source_version = 0;
@@ -484,6 +488,9 @@ SlpObjHash *slp_obj_hash_new(SlpAllocator *alloc) {
     h->capacity = 0;
     h->count = 0;
     h->next_sequence = 0;
+    h->bridge_identity = 0;
+    h->bridge_serializing = false;
+    h->bridge_syncing = false;
     h->order_mode = 0;
     h->miss_policy = NULL;
     h->removal_policy = NULL;
@@ -717,6 +724,8 @@ SlpObjNative *slp_obj_native_new(SlpAllocator *alloc, SlpNativeFn fn, SlpObjStri
     native->obj.is_marked = false;
     native->obj.next = NULL;
     native->fn = fn;
+    native->named_fn = NULL;
+    native->userdata = NULL;
     native->name = name;
     native->preserve_references = false;
     return native;

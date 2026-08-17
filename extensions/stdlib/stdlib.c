@@ -643,6 +643,19 @@ static SlpValue builtin_use(
     if (argc < 1 || argc > 2)
         return SLP_NULL_VAL;
 
+    if (vm->java_backend_installed &&
+        vm->java_backend.load_extension) {
+        SlpValue result = SLP_NULL_VAL;
+        SlpJavaBackendResult handled =
+            vm->java_backend.load_extension(
+                vm, args, argc, &result,
+                vm->java_backend.userdata);
+        if (handled == SLP_JAVA_HANDLED)
+            return result;
+        if (handled == SLP_JAVA_FAILED)
+            return SLP_NULL_VAL;
+    }
+
     if (argc == 2) {
         SlpObjString *source =
             slp_vm_stringify(

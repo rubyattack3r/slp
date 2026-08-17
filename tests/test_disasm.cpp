@@ -90,3 +90,54 @@ TEST_CASE("Disassembler: single-byte local operand does not desync the stream") 
 
     slp_chunk_free(&chunk);
 }
+
+TEST_CASE("Disassembler: import consumes both short operands") {
+    SlpChunk chunk;
+    slp_chunk_init(&chunk, &td_allocator);
+    slp_chunk_write(&chunk, OP_IMPORT, 1);
+    slp_chunk_write_short(&chunk, 2, 1);
+    slp_chunk_write_short(&chunk, 7, 1);
+    slp_chunk_write(&chunk, OP_RETURN, 1);
+
+    FILE *tmp = tmpfile();
+    REQUIRE(tmp != nullptr);
+    slp_disasm_chunk(&chunk, "import_test", tmp);
+    rewind(tmp);
+    char buffer[2048];
+    size_t count = fread(
+        buffer, 1, sizeof(buffer) - 1, tmp);
+    buffer[count] = '\0';
+    fclose(tmp);
+
+    CHECK(strstr(buffer, "IMPORT") != nullptr);
+    CHECK(strstr(buffer, "   2    7") != nullptr);
+    CHECK(strstr(buffer, "RETURN") != nullptr);
+
+    slp_chunk_free(&chunk);
+}
+
+TEST_CASE("Disassembler: bridge registration consumes condition flag") {
+    SlpChunk chunk;
+    slp_chunk_init(&chunk, &td_allocator);
+    slp_chunk_write(&chunk, OP_BRIDGE_REGISTER, 1);
+    slp_chunk_write_short(&chunk, 2, 1);
+    slp_chunk_write_short(&chunk, 3, 1);
+    slp_chunk_write_short(&chunk, 4, 1);
+    slp_chunk_write_short(&chunk, 1, 1);
+    slp_chunk_write(&chunk, OP_RETURN, 1);
+
+    FILE *tmp = tmpfile();
+    REQUIRE(tmp != nullptr);
+    slp_disasm_chunk(&chunk, "bridge_test", tmp);
+    rewind(tmp);
+    char buffer[2048];
+    size_t count = fread(
+        buffer, 1, sizeof(buffer) - 1, tmp);
+    buffer[count] = '\0';
+    fclose(tmp);
+
+    CHECK(strstr(buffer, "BRIDGE_REGISTER") != nullptr);
+    CHECK(strstr(buffer, "   2    3    4    1") != nullptr);
+    CHECK(strstr(buffer, "RETURN") != nullptr);
+    slp_chunk_free(&chunk);
+}

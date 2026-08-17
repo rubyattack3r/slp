@@ -76,6 +76,54 @@ static void compiler_error(SlpCompiler *compiler, int line, const char *msg) {
 
 static SlpObjString *intern_str(SlpCompiler *compiler, const char *chars, uint32_t len);
 
+static SlpObjString *intern_import_path(
+    SlpCompiler *compiler, const char *path) {
+    size_t length = slp_utils_strlen(path);
+    if (length < 2 ||
+        ((path[0] != '\'' || path[length - 1] != '\'') &&
+         (path[0] != '"' || path[length - 1] != '"')))
+        return intern_str(
+            compiler, path, (uint32_t)length);
+
+    char quote = path[0];
+    char *unquoted =
+        (char*)compiler->allocator->reallocate(
+            NULL, length - 1,
+            compiler->allocator->user_data);
+    if (!unquoted) return NULL;
+    size_t write_index = 0;
+    for (size_t read_index = 1;
+         read_index + 1 < length;
+         read_index++) {
+        char current = path[read_index];
+        if (current == '\\' &&
+            read_index + 2 < length) {
+            char next = path[read_index + 1];
+            if (quote == '\'' &&
+                next != '\'' && next != '\\') {
+                unquoted[write_index++] = current;
+                continue;
+            }
+            switch (next) {
+            case 'n': current = '\n'; break;
+            case 't': current = '\t'; break;
+            case 'r': current = '\r'; break;
+            default: current = next; break;
+            }
+            read_index++;
+        }
+        unquoted[write_index++] = current;
+    }
+    unquoted[write_index] = '\0';
+    SlpObjString *result = intern_str(
+        compiler, unquoted,
+        (uint32_t)write_index);
+    compiler->allocator->reallocate(
+        unquoted, 0,
+        compiler->allocator->user_data);
+    return result;
+}
+
 static void init_compiler(SlpCompiler *compiler, SlpCompiler *enclosing,
                           SlpVM *vm, SlpAllocator *allocator) {
     compiler->enclosing = enclosing;
@@ -271,6 +319,7 @@ static bool assert_condition_is_predicate(SlpASTNode *condition) {
     case SLP_TOKEN_EQI:
     case SLP_TOKEN_NEQI:
     case SLP_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE:
+    case SLP_TOKEN_ID:
         return true;
     default:
         /*
@@ -302,6 +351,7 @@ static bool condition_is_explicit_predicate(
     case SLP_TOKEN_EQI:
     case SLP_TOKEN_NEQI:
     case SLP_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE:
+    case SLP_TOKEN_ID:
         return true;
     default:
         return false;
@@ -378,6 +428,120 @@ static void compile_assignment_container(
         return;
     }
     compile_expr(compiler, container);
+}
+
+static void append_decimal(
+    SlpStringBuffer *buffer, size_t value) {
+    char digits[32];
+    int length = snprintf(
+        digits, sizeof(digits), "%zu", value);
+    if (length > 0)
+        slp_string_buffer_append_string(
+            buffer, digits, (size_t)length);
+}
+
+static void condition_leaf_name(
+    SlpASTNode *node, const char **name,
+    size_t *length, bool *negated) {
+    *name = "-istrue";
+    *length = 7;
+    *negated = false;
+    if (!node) return;
+    if (node->type == SLP_AST_UNARYOP) {
+        if (node->as.unaryop.op.type ==
+                SLP_TOKEN_UNARY_PREDICATE_BRIDGE) {
+            *name = node->as.unaryop.op.start;
+            *length = node->as.unaryop.op.length;
+        } else if (node->as.unaryop.op.type ==
+                   SLP_TOKEN_BANG) {
+            *name = "!-istrue";
+            *length = 8;
+        }
+        return;
+    }
+    if (node->type == SLP_AST_BINOP &&
+        condition_is_explicit_predicate(node)) {
+        *name = node->as.binop.op.start;
+        *length = node->as.binop.op.length;
+        *negated = node->as.binop.negate;
+    }
+}
+
+static void emit_condition_leaf_closure(
+    SlpCompiler *compiler, SlpASTNode *leaf,
+    const char *keyword, int line) {
+    SlpCompiler leaf_compiler;
+    init_compiler(
+        &leaf_compiler, compiler,
+        compiler->vm, compiler->allocator);
+    compile_expr(&leaf_compiler, leaf);
+    emit_byte(&leaf_compiler, OP_RETURN, leaf ? leaf->line : line);
+    leaf_compiler.function->line_start = leaf ? leaf->line : line;
+    leaf_compiler.function->line_end = leaf ? leaf->line : line;
+    if (leaf_compiler.had_error)
+        compiler_error(
+            compiler, leaf_compiler.error_line,
+            leaf_compiler.error_message);
+    if (keyword)
+        leaf_compiler.function->name = intern_str(
+            &leaf_compiler, keyword,
+            (uint32_t)slp_utils_strlen(keyword));
+    SlpObjFunction *function = leaf_compiler.function;
+    emit_byte(compiler, OP_CLOSURE, line);
+    emit_short(
+        compiler,
+        make_constant(compiler, SLP_OBJ_VAL(function)),
+        line);
+    for (int i = 0; i < function->upvalue_count; i++) {
+        emit_byte(
+            compiler,
+            leaf_compiler.upvalues[i].is_local ? 1 : 0,
+            line);
+        emit_byte(
+            compiler, leaf_compiler.upvalues[i].index,
+            line);
+    }
+}
+
+static size_t emit_condition_tree(
+    SlpCompiler *compiler, SlpASTNode *node,
+    const char *keyword, SlpStringBuffer *shape,
+    int line) {
+    if (node && node->type == SLP_AST_BINOP &&
+        (node->as.binop.op.type == SLP_TOKEN_LAND ||
+         node->as.binop.op.type == SLP_TOKEN_LOR)) {
+        slp_string_buffer_append_char(
+            shape,
+            node->as.binop.op.type == SLP_TOKEN_LAND
+                ? 'A' : 'O');
+        slp_string_buffer_append_char(shape, '(');
+        size_t count = emit_condition_tree(
+            compiler, node->as.binop.left,
+            keyword, shape, line);
+        slp_string_buffer_append_char(shape, ',');
+        count += emit_condition_tree(
+            compiler, node->as.binop.right,
+            keyword, shape, line);
+        slp_string_buffer_append_char(shape, ')');
+        return count;
+    }
+
+    const char *name;
+    size_t name_length;
+    bool negated;
+    condition_leaf_name(
+        node, &name, &name_length, &negated);
+    size_t encoded_length = name_length + (negated ? 1 : 0);
+    slp_string_buffer_append_char(shape, 'P');
+    append_decimal(shape, encoded_length);
+    slp_string_buffer_append_char(shape, ':');
+    if (negated)
+        slp_string_buffer_append_char(shape, '!');
+    slp_string_buffer_append_string(
+        shape, name, name_length);
+    emit_condition_leaf_closure(
+        compiler, node, keyword, line);
+    return 1;
 }
 
 static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
@@ -524,7 +688,8 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
             break;
         }
         if (node->as.binop.op.type ==
-            SLP_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE) {
+                SLP_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE ||
+            node->as.binop.op.type == SLP_TOKEN_ID) {
             /*
              * Sleep's predicate bridges are the exception to its usual
              * right-to-left operand evaluation: predicates evaluate their
@@ -1154,6 +1319,22 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
         break;
     }
     case SLP_AST_ENV_BRIDGE: {
+        SlpStringBuffer condition_shape;
+        size_t condition_count = 0;
+        bool has_condition =
+            node->as.env_bridge.condition != NULL;
+        if (node->as.env_bridge.condition) {
+            slp_string_buffer_init(
+                &condition_shape, compiler->allocator);
+            condition_count = emit_condition_tree(
+                compiler, node->as.env_bridge.condition,
+                node->as.env_bridge.keyword,
+                &condition_shape, line);
+            if (condition_count > UINT16_MAX)
+                compiler_error(
+                    compiler, line,
+                    "Predicate environment condition is too large.");
+        }
         SlpCompiler sub_compiler;
         init_compiler(&sub_compiler, compiler, compiler->vm, compiler->allocator);
         sub_compiler.inline_body =
@@ -1199,15 +1380,42 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
             emit_byte(compiler, sub_compiler.upvalues[i].is_local ? 1 : 0, line);
             emit_byte(compiler, sub_compiler.upvalues[i].index, line);
         }
-        if (node->as.env_bridge.keyword && node->as.env_bridge.identifier) {
+        if (node->as.env_bridge.keyword &&
+            (node->as.env_bridge.identifier ||
+             node->as.env_bridge.condition)) {
             SlpObjString *kw = intern_str(compiler, node->as.env_bridge.keyword,
                 (uint32_t)slp_utils_strlen(node->as.env_bridge.keyword));
             emit_byte(compiler, OP_BRIDGE_REGISTER, line);
             emit_short(compiler, make_constant(compiler, SLP_OBJ_VAL(kw)), line);
-            SlpObjString *name = intern_str(compiler, node->as.env_bridge.identifier,
-                (uint32_t)slp_utils_strlen(node->as.env_bridge.identifier));
-            emit_short(compiler, make_constant(compiler, SLP_OBJ_VAL(name)), line);
+            SlpValue name_value = SLP_NULL_VAL;
+            if (node->as.env_bridge.identifier) {
+                SlpObjString *name = intern_str(
+                    compiler, node->as.env_bridge.identifier,
+                    (uint32_t)slp_utils_strlen(
+                        node->as.env_bridge.identifier));
+                name_value = SLP_OBJ_VAL(name);
+            }
+            emit_short(
+                compiler, make_constant(compiler, name_value), line);
+            SlpValue string_arg = SLP_NULL_VAL;
+            if (has_condition) {
+                SlpObjString *text = intern_str(
+                    compiler, condition_shape.data,
+                    (uint32_t)condition_shape.length);
+                string_arg = SLP_OBJ_VAL(text);
+            } else if (node->as.env_bridge.string) {
+                SlpObjString *text = intern_str(
+                    compiler, node->as.env_bridge.string,
+                    (uint32_t)slp_utils_strlen(node->as.env_bridge.string));
+                string_arg = SLP_OBJ_VAL(text);
+            }
+            emit_short(
+                compiler, make_constant(compiler, string_arg), line);
+            emit_short(
+                compiler, (uint16_t)condition_count, line);
         }
+        if (has_condition)
+            slp_string_buffer_free(&condition_shape);
         break;
     }
     case SLP_AST_IMPORT: {
@@ -1217,8 +1425,14 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
             emit_byte(compiler, OP_IMPORT, line);
             emit_short(compiler, make_constant(compiler, SLP_OBJ_VAL(target)), line);
             if (node->as.import_stmt.path) {
-                SlpObjString *path = intern_str(compiler, node->as.import_stmt.path,
-                    (uint32_t)slp_utils_strlen(node->as.import_stmt.path));
+                SlpObjString *path = intern_import_path(
+                    compiler, node->as.import_stmt.path);
+                if (!path) {
+                    compiler_error(
+                        compiler, line,
+                        "Out of memory while compiling import path.");
+                    break;
+                }
                 emit_short(compiler, make_constant(compiler, SLP_OBJ_VAL(path)), line);
             } else {
                 emit_short(compiler, 0, line);

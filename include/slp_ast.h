@@ -25,6 +25,7 @@ bool slp_ast_get_bool(SlpASTNode *node);
 const char *slp_ast_get_env_bridge_keyword(SlpASTNode *node);
 const char *slp_ast_get_env_bridge_id(SlpASTNode *node);
 const char *slp_ast_get_env_bridge_string(SlpASTNode *node);
+SlpASTNode *slp_ast_get_env_bridge_condition(SlpASTNode *node);
 const char *slp_ast_get_foreach_index(SlpASTNode *node);
 const char *slp_ast_get_foreach_value(SlpASTNode *node);
 const char *slp_ast_get_import_path(SlpASTNode *node);
@@ -75,6 +76,8 @@ void slp_ast_set_env_bridge_id(SlpASTNode *node, const char *id,
                                   SlpAllocator *allocator);
 void slp_ast_set_env_bridge_string(SlpASTNode *node, const char *str,
                                       SlpAllocator *allocator);
+void slp_ast_set_env_bridge_condition(
+    SlpASTNode *node, SlpASTNode *condition);
 void slp_ast_set_env_bridge_body(SlpASTNode *node, SlpASTNode *body);
 void slp_ast_set_call_target(SlpASTNode *node, const char *target,
                                 SlpAllocator *allocator);
