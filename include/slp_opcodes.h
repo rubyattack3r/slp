@@ -141,6 +141,7 @@ typedef enum {
     OP_CONTINUE,
 
     OP_NOP,
+    OP_INVALID_PREDICATE_VALUE,
 
     OP_END
 } SlpOpcode;

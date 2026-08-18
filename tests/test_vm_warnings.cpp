@@ -545,6 +545,32 @@ TEST_CASE("VM warnings: unknown unary predicates warn and evaluate false") {
     slp_vm_free(vm);
 }
 
+TEST_CASE("VM warnings: predicates are not scalar return values") {
+    SlpVM *vm = slp_vm_new(&warning_allocator);
+    REQUIRE(vm != NULL);
+    std::string output;
+    slp_vm_set_write_fn(vm, capture_warning_output, &output);
+    slp_vm_set_source_name(vm, "predicate-return.sl");
+
+    SlpResult result = slp_vm_interpret(
+        vm,
+        "sub invalid_arch { return $1 eq 'x64' || $1 eq 'x86'; }\n"
+        "sub valid_arch {\n"
+        "  if (($1 eq 'x64') || ($1 eq 'x86')) { return 1; }\n"
+        "  return 0;\n"
+        "}\n"
+        "$invalid = invalid_arch('x86');\n"
+        "$valid = valid_arch('x86');\n");
+
+    CHECK(result == SLP_OK);
+    CHECK(SLP_IS_NULL(warning_global(vm, "$invalid")));
+    CHECK(SLP_AS_NUM(warning_global(vm, "$valid")) == 1.0);
+    CHECK(output ==
+          "Warning: predicate cannot be used as a scalar return value at "
+          "predicate-return.sl:1\n");
+    slp_vm_free(vm);
+}
+
 TEST_CASE("VM warnings: assertions use predicate grammar and lazy messages") {
     SlpVM *vm = slp_vm_new(&warning_allocator);
     REQUIRE(vm != NULL);

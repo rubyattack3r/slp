@@ -301,8 +301,12 @@ static bool condition_is_explicit_predicate(
     case SLP_TOKEN_GE:
     case SLP_TOKEN_EQI:
     case SLP_TOKEN_NEQI:
-    case SLP_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE:
         return true;
+    case SLP_TOKEN_BUILTIN_BINARY_PREDICATE_BRIDGE:
+        /* cmp is a scalar three-way comparison even though the lexer shares
+         * the predicate bridge token with eq, ne, is, and related operators. */
+        return condition->as.binop.op.length != 3 ||
+               memcmp(condition->as.binop.op.start, "cmp", 3) != 0;
     default:
         return false;
     }
@@ -1057,7 +1061,9 @@ static void compile_node(SlpCompiler *compiler, SlpASTNode *node) {
         break;
     }
     case SLP_AST_RETURN:
-        if (node->as.control.value)
+        if (condition_is_explicit_predicate(node->as.control.value))
+            emit_byte(compiler, OP_INVALID_PREDICATE_VALUE, line);
+        else if (node->as.control.value)
             compile_expr(compiler, node->as.control.value);
         else
             emit_byte(compiler, OP_PUSH_NULL, line);

@@ -4981,6 +4981,12 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
             }
             break;
         }
+        case OP_INVALID_PREDICATE_VALUE:
+            slp_vm_warning(
+                vm,
+                "predicate cannot be used as a scalar return value");
+            slp_vm_push(vm, SLP_NULL_VAL);
+            break;
         case OP_RETURN: {
             SlpValue result = slp_vm_pop(vm);
             SlpCallFrame *returning_frame = current_frame(vm);

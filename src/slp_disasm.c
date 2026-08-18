@@ -98,6 +98,8 @@ const char *slp_opcode_name(SlpOpcode op) {
     case OP_POP_HANDLER: return "POP_HANDLER";
     case OP_THROW:       return "THROW";
     case OP_ASSERT:      return "ASSERT";
+    case OP_INVALID_PREDICATE_VALUE:
+        return "INVALID_PREDICATE_VALUE";
     case OP_HALT:        return "HALT";
     case OP_DONE:        return "DONE";
     case OP_YIELD:       return "YIELD";
