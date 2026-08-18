@@ -6006,12 +6006,7 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
             bool trace_result = true;
 
             if (strcmp(pred_name->chars, "is") == 0) {
-                if (SLP_IS_NULL(a) && SLP_IS_NULL(b)) result = true;
-                else if (SLP_IS_NULL(a) || SLP_IS_NULL(b)) result = false;
-                else if (a.type != b.type) result = false;
-                else if (SLP_IS_NUM(a)) result = (SLP_AS_NUM(a) == SLP_AS_NUM(b));
-                else if (SLP_IS_BOOL(a)) result = (SLP_AS_BOOL(a) == SLP_AS_BOOL(b));
-                else result = (SLP_AS_OBJ(a) == SLP_AS_OBJ(b));
+                result = slp_value_identity_equals(a, b);
             } else if (strcmp(pred_name->chars, "eq") == 0) {
                 const char *sa_chars, *sb_chars;
                 uint32_t sa_len, sb_len;

@@ -2108,6 +2108,9 @@ TEST_CASE("stdlib taint and untaint preserve per-scalar state") {
         "$number = taint(7);"
         "$sum = $number + 5;"
         "$sum_state = -istainted $sum;"
+        "$missing = indexOf($value, 'missing');"
+        "$missing_state = -istainted $missing;"
+        "$missing_is_null = $missing is $null;"
         "$upper = uc($value);"
         "$upper_state = -istainted $upper;"
         "sub derived { return 99; }"
@@ -2138,6 +2141,10 @@ TEST_CASE("stdlib taint and untaint preserve per-scalar state") {
         get_stdlib_global(vm, "$combined_state")));
     CHECK(!slp_value_is_falsy(
         get_stdlib_global(vm, "$sum_state")));
+    CHECK(!slp_value_is_falsy(
+        get_stdlib_global(vm, "$missing_state")));
+    CHECK(!slp_value_is_falsy(
+        get_stdlib_global(vm, "$missing_is_null")));
     CHECK(slp_value_as_number(
               get_stdlib_global(
                   vm, "$sum")) == 12.0);
