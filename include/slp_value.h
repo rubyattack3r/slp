@@ -159,6 +159,12 @@ typedef struct {
      * distinct object scalars; scalar() explicitly unwraps this value.
      */
     SlpValue value;
+    /*
+     * Optional provider-owned reference to a real Java object. The portable
+     * runtime leaves this NULL. When present, the VM's installed Java backend
+     * releases it as part of normal GC finalization.
+     */
+    void *backend_handle;
 } SlpObjJavaObject;
 
 typedef struct {
@@ -238,6 +244,10 @@ struct SlpObjArray {
     int count;
     int capacity;
     uint64_t mutation_version;
+    /* Stable identity used by optional object bridges. Zero is unassigned. */
+    uint64_t bridge_identity;
+    bool bridge_serializing;
+    bool bridge_syncing;
     /* sublist() is a mutable view. The view keeps a local window for ordinary
        reads and mirrors mutations into its source array. */
     SlpObjArray *view_source;
@@ -259,6 +269,10 @@ struct SlpObjHash {
     int capacity;
     int count;
     uint64_t next_sequence;
+    /* Stable identity used by optional object bridges. Zero is unassigned. */
+    uint64_t bridge_identity;
+    bool bridge_serializing;
+    bool bridge_syncing;
     /* 0: Java-compatible hash order, 1: insertion order, 2: access order. */
     uint8_t order_mode;
     SlpObjClosure *miss_policy;
@@ -289,10 +303,15 @@ typedef struct {
 
 typedef struct SlpVM SlpVM;
 typedef SlpValue (*SlpNativeFn)(SlpVM *vm, SlpValue *args, int argc);
+typedef SlpValue (*SlpNamedNativeFn)(
+    SlpVM *vm, const char *name,
+    SlpValue *args, int argc, void *userdata);
 
 typedef struct {
     SlpObj obj;
     SlpNativeFn fn;
+    SlpNamedNativeFn named_fn;
+    void *userdata;
     SlpObjString *name;
     /*
      * Most native functions receive ordinary scalar values. A small number

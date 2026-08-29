@@ -217,12 +217,19 @@ void slp_ast_get_children(SlpASTNode *node, SlpASTNode ***out_children,
     break;
   }
   case SLP_AST_ENV_BRIDGE: {
-    if (node->as.env_bridge.body) {
+    size_t count = 0;
+    if (node->as.env_bridge.condition) count++;
+    if (node->as.env_bridge.body) count++;
+    if (count > 0) {
       SlpASTNode **children = (SlpASTNode **)allocator->reallocate(
-          NULL, 1 * sizeof(SlpASTNode *), allocator->user_data);
-      children[0] = node->as.env_bridge.body;
+          NULL, count * sizeof(SlpASTNode *), allocator->user_data);
+      size_t index = 0;
+      if (node->as.env_bridge.condition)
+        children[index++] = node->as.env_bridge.condition;
+      if (node->as.env_bridge.body)
+        children[index++] = node->as.env_bridge.body;
       *out_children = children;
-      *out_count = 1;
+      *out_count = count;
     }
     break;
   }
@@ -480,6 +487,12 @@ const char *slp_ast_get_env_bridge_string(SlpASTNode *node) {
              : NULL;
 }
 
+SlpASTNode *slp_ast_get_env_bridge_condition(SlpASTNode *node) {
+  return (node && node->type == SLP_AST_ENV_BRIDGE)
+             ? node->as.env_bridge.condition
+             : NULL;
+}
+
 const char *slp_ast_get_foreach_index(SlpASTNode *node) {
   return (node && node->type == SLP_AST_FOREACH) ? node->as.foreach.index
                                                     : NULL;
@@ -732,6 +745,12 @@ void slp_ast_set_env_bridge_string(SlpASTNode *node, const char *str,
   }
 }
 
+void slp_ast_set_env_bridge_condition(
+    SlpASTNode *node, SlpASTNode *condition) {
+  if (node && node->type == SLP_AST_ENV_BRIDGE)
+    node->as.env_bridge.condition = condition;
+}
+
 void slp_ast_set_env_bridge_body(SlpASTNode *node, SlpASTNode *body) {
   if (node && node->type == SLP_AST_ENV_BRIDGE)
     node->as.env_bridge.body = body;
@@ -906,6 +925,10 @@ void slp_parser_free_node(SlpASTNode *node, SlpAllocator *allocator) {
       slp_parser_free_node(node->as.call.target, allocator);
     break;
   case SLP_AST_ENV_BRIDGE:
+    if (node->as.env_bridge.condition) {
+      slp_parser_free_node(
+          node->as.env_bridge.condition, allocator);
+    }
     if (node->as.env_bridge.body) {
       slp_parser_free_node(node->as.env_bridge.body, allocator);
     }
@@ -1504,6 +1527,11 @@ static void format_node(SlpASTNode *node, SlpStringBuffer *buffer,
       slp_string_buffer_append_string(
           buffer, node->as.env_bridge.string,
           slp_utils_strlen(node->as.env_bridge.string));
+    }
+    if (node->as.env_bridge.condition) {
+      slp_string_buffer_append_string(buffer, " (", 2);
+      format_node(node->as.env_bridge.condition, buffer, depth);
+      slp_string_buffer_append_char(buffer, ')');
     }
     if (node->as.env_bridge.body) {
       slp_string_buffer_append_char(buffer, ' ');

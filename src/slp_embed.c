@@ -354,6 +354,19 @@ SlpResult slp_callable_call(
         arguments, argument_count, out_result);
 }
 
+SlpResult slp_callable_call_message(
+    SlpCallable *callable, const char *message,
+    const SlpValue *arguments, int argument_count,
+    SlpValue *out_result) {
+    if (out_result)
+        *out_result = SLP_NULL_VAL;
+    if (!callable || !callable->vm || !message)
+        return SLP_RUNTIME_ERROR;
+    return slp_vm_call_value_message(
+        callable->vm, callable->value, message,
+        arguments, argument_count, out_result);
+}
+
 bool slp_args_next_callable(
     SlpArgs *reader, SlpCallable **out_callable) {
     SlpValue value;

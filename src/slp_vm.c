@@ -63,6 +63,7 @@ SlpVM *slp_vm_new(SlpAllocator *allocator) {
 
     vm->open_upvalues = NULL;
     vm->bridge_types = NULL;
+    vm->predicate_names = NULL;
     vm->halted = false;
     vm->flow_exit_requested = false;
     vm->thrown_exception = SLP_NULL_VAL;
@@ -77,6 +78,7 @@ SlpVM *slp_vm_new(SlpAllocator *allocator) {
     vm->last_stack_trace = NULL;
     vm->next_closure_identity = 0;
     vm->next_proxy_identity = 0;
+    vm->next_bridge_identity = 0;
 
     slp_gc_init(vm);
 
@@ -97,6 +99,11 @@ SlpVM *slp_vm_new(SlpAllocator *allocator) {
 }
 
 void slp_vm_free(SlpVM *vm) {
+    if (!vm) return;
+    if (vm->java_backend_installed &&
+        vm->java_backend.vm_closing)
+        vm->java_backend.vm_closing(
+            vm, vm->java_backend.userdata);
     slp_embed_release_all(vm);
     SlpBridgeType *bt = vm->bridge_types;
     while (bt) {
@@ -105,6 +112,13 @@ void slp_vm_free(SlpVM *vm) {
         SLP_FREE(vm->allocator, bt);
         bt = next;
     }
+    SlpPredicateName *predicate = vm->predicate_names;
+    while (predicate) {
+        SlpPredicateName *next = predicate->next;
+        SLP_FREE(vm->allocator, predicate->name);
+        SLP_FREE(vm->allocator, predicate);
+        predicate = next;
+    }
     if (vm->interned)
         vm->allocator->reallocate(vm->interned, 0, vm->allocator->user_data);
     if (vm->source_name)
@@ -112,6 +126,10 @@ void slp_vm_free(SlpVM *vm) {
     if (vm->source_path)
         SLP_FREE(vm->allocator, vm->source_path);
     slp_gc_free(vm);
+    if (vm->java_backend_installed &&
+        vm->java_backend.destroy)
+        vm->java_backend.destroy(
+            vm, vm->java_backend.userdata);
     SLP_FREE(vm->allocator, vm);
 }
 
@@ -596,13 +614,19 @@ SlpObjClass *slp_vm_new_class(SlpVM *vm, const char *name) {
 
 SlpObjArray *slp_vm_new_array(SlpVM *vm) {
     SlpObjArray *arr = slp_obj_array_new(vm->allocator);
-    if (arr) track_object(vm, &arr->obj);
+    if (arr) {
+        arr->bridge_identity = ++vm->next_bridge_identity;
+        track_object(vm, &arr->obj);
+    }
     return arr;
 }
 
 SlpObjHash *slp_vm_new_hash(SlpVM *vm) {
     SlpObjHash *hash = slp_obj_hash_new(vm->allocator);
-    if (hash) track_object(vm, &hash->obj);
+    if (hash) {
+        hash->bridge_identity = ++vm->next_bridge_identity;
+        track_object(vm, &hash->obj);
+    }
     return hash;
 }
 
@@ -631,6 +655,41 @@ SlpObjJavaObject *slp_vm_new_java_object(
         if (!object->list) return NULL;
     }
     return object;
+}
+
+SlpObjJavaObject *slp_vm_new_java_reference(
+    SlpVM *vm, const char *class_name,
+    SlpJavaObjectKind kind, void *backend_handle) {
+    if (!vm || !backend_handle ||
+        !vm->java_backend_installed)
+        return NULL;
+    SlpObjJavaObject *object =
+        slp_vm_new_java_object(vm, class_name, kind);
+    if (!object) {
+        if (vm->java_backend.release_object)
+            vm->java_backend.release_object(
+                vm, backend_handle,
+                vm->java_backend.userdata);
+        return NULL;
+    }
+    object->backend_handle = backend_handle;
+    return object;
+}
+
+bool slp_vm_install_java_backend(
+    SlpVM *vm, const SlpJavaBackend *backend) {
+    if (!vm || !backend ||
+        backend->abi_version !=
+            SLP_JAVA_BACKEND_ABI_VERSION ||
+        vm->java_backend_installed)
+        return false;
+    vm->java_backend = *backend;
+    vm->java_backend_installed = true;
+    return true;
+}
+
+bool slp_vm_has_java_backend(const SlpVM *vm) {
+    return vm && vm->java_backend_installed;
 }
 
 SlpObjIOHandle *slp_vm_get_console_handle(SlpVM *vm) {
@@ -2206,6 +2265,24 @@ static void assign_binding(
             vm->allocator, scope, name, value);
 }
 
+bool slp_vm_set_global_value(
+    SlpVM *vm, const char *name, SlpValue value) {
+    if (!vm || !name) return false;
+    SlpObjString *key = slp_vm_copy_cstr(vm, name);
+    if (!key) return false;
+    assign_binding(
+        vm, vm->globals, SLP_OBJ_VAL(key), value);
+    return true;
+}
+
+bool slp_vm_delete_global_value(
+    SlpVM *vm, const char *name) {
+    if (!vm || !name) return false;
+    SlpObjString *key = slp_vm_copy_cstr(vm, name);
+    return key && slp_vm_hash_delete(
+        vm, vm->globals, SLP_OBJ_VAL(key));
+}
+
 static SlpObjHash *scoped_variable_level(SlpVM *vm, SlpValue name) {
     SlpCallFrame *frame = vm->frame_count > 0 ? current_frame(vm) : NULL;
     SlpObjHash *local = current_local_scope(frame);
@@ -2552,6 +2629,25 @@ static void define_native_ex(
 
 static void define_native(SlpVM *vm, const char *name, SlpNativeFn fn) {
     define_native_ex(vm, name, fn, false);
+}
+
+static void define_named_native(
+    SlpVM *vm, const char *name,
+    SlpNamedNativeFn fn, void *userdata) {
+    SlpObjString *name_str =
+        slp_vm_copy_string(
+            vm, name, (uint32_t)strlen(name));
+    if (!name_str) return;
+    SlpObjNative *native =
+        slp_obj_native_new(
+            vm->allocator, NULL, name_str);
+    if (!native) return;
+    native->named_fn = fn;
+    native->userdata = userdata;
+    track_object(vm, &native->obj);
+    slp_obj_hash_set(
+        vm->allocator, vm->globals,
+        SLP_OBJ_VAL(name_str), SLP_OBJ_VAL(native));
 }
 
 static SlpValue native_println(SlpVM *vm, SlpValue *args, int argc) {
@@ -3330,7 +3426,15 @@ static bool call_value(
                     slp_value_unwrap_taint(
                         argument);
             }
-        SlpValue result = native->fn(vm, native_args, total_args);
+        SlpValue result = native->named_fn
+            ? native->named_fn(
+                  vm,
+                  native->name
+                      ? native->name->chars
+                      : "",
+                  native_args, total_args,
+                  native->userdata)
+            : native->fn(vm, native_args, total_args);
         if (!native->preserve_references &&
             tainted_arguments)
             result =
@@ -3349,6 +3453,37 @@ static bool call_value(
                 trace.line, trace.enabled,
                 result, vm->abort_requested, false);
         }
+        return true;
+    }
+    case SLP_OBJ_JAVA_OBJECT: {
+        if (!vm->java_backend_installed ||
+            !vm->java_backend.call_callable) {
+            vm->stack_top -= total_args + 1;
+            slp_vm_push(vm, SLP_NULL_VAL);
+            return true;
+        }
+        SlpValue *raw_args = vm->stack_top - total_args;
+        const char *message = "";
+        if (has_message) {
+            SlpObjString *text = slp_vm_stringify(
+                vm, dereference_value(raw_args[0]));
+            message = text ? text->chars : "";
+            raw_args++;
+        }
+        SlpValue result = SLP_NULL_VAL;
+        SlpJavaBackendResult status =
+            vm->java_backend.call_callable(
+                vm, callee, message, raw_args,
+                arg_count, &result,
+                vm->java_backend.userdata);
+        vm->stack_top -= total_args + 1;
+        slp_vm_push(
+            vm, status == SLP_JAVA_HANDLED
+                    ? result
+                    : SLP_NULL_VAL);
+        if (status == SLP_JAVA_UNHANDLED)
+            slp_vm_warning(
+                vm, "Attempted to call a non-callable Java object.");
         return true;
     }
     case SLP_OBJ_CONTINUATION: {
@@ -4273,6 +4408,39 @@ SlpResult slp_vm_run(SlpVM *vm, SlpObjFunction *fn) {
     return slp_vm_call(vm, 0, false);
 }
 
+static const char *java_operator_for_opcode(uint8_t instruction) {
+    switch (instruction) {
+    case OP_ADD: return "+";
+    case OP_SUBTRACT: return "-";
+    case OP_MULTIPLY: return "*";
+    case OP_DIVIDE: return "/";
+    case OP_MODULO: return "%";
+    case OP_POWER: return "**";
+    case OP_CONCAT: return ".";
+    case OP_REPEAT: return "x";
+    case OP_BIT_AND: return "&";
+    case OP_BIT_OR: return "|";
+    case OP_BIT_XOR: return "^";
+    case OP_LSHIFT: return "<<";
+    case OP_RSHIFT: return ">>";
+    default: return NULL;
+    }
+}
+
+static const char *java_predicate_for_opcode(uint8_t instruction) {
+    switch (instruction) {
+    case OP_EQUAL: return "==";
+    case OP_NOT_EQUAL: return "!=";
+    case OP_LESS: return "<";
+    case OP_GREATER: return ">";
+    case OP_LESS_EQUAL: return "<=";
+    case OP_GREATER_EQUAL: return ">=";
+    case OP_MATCH: return "=~";
+    case OP_NOT_MATCH: return "!=~";
+    default: return NULL;
+    }
+}
+
 SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
     SlpValue callee = slp_vm_peek(vm, arg_count + (has_message ? 1 : 0));
     if (!call_value(
@@ -4293,6 +4461,57 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
             if (vm->bytes_allocated > vm->next_gc_threshold)
                 slp_gc_collect(vm);
             uint8_t instruction = read_byte(current_frame(vm));
+            if (vm->java_backend_installed &&
+                vm->stack_top - vm->stack >= 2) {
+                const char *operator_name =
+                    java_operator_for_opcode(instruction);
+                if (operator_name && vm->java_backend.operate) {
+                    SlpValue terms[] = {
+                        slp_vm_peek(vm, 1), slp_vm_peek(vm, 0)};
+                    SlpValue result = SLP_NULL_VAL;
+                    SlpJavaBackendResult status =
+                        vm->java_backend.operate(
+                            vm, operator_name, terms, 2,
+                            &result,
+                            vm->java_backend.userdata);
+                    if (status != SLP_JAVA_UNHANDLED) {
+                        slp_vm_pop(vm);
+                        slp_vm_pop(vm);
+                        slp_vm_push(
+                            vm, status == SLP_JAVA_HANDLED
+                                    ? propagate_taint_binary(
+                                          vm, result,
+                                          terms[0], terms[1])
+                                    : SLP_NULL_VAL);
+                        continue;
+                    }
+                }
+                const char *predicate_name =
+                    java_predicate_for_opcode(instruction);
+                if (predicate_name && vm->java_backend.decide) {
+                    SlpValue terms[] = {
+                        slp_vm_peek(vm, 1), slp_vm_peek(vm, 0)};
+                    bool result = false;
+                    SlpJavaBackendResult status =
+                        vm->java_backend.decide(
+                            vm, predicate_name, terms, 2,
+                            &result,
+                            vm->java_backend.userdata);
+                    if (status != SLP_JAVA_UNHANDLED) {
+                        slp_vm_pop(vm);
+                        slp_vm_pop(vm);
+                        if (status == SLP_JAVA_HANDLED)
+                            trace_binary_predicate(
+                                vm, terms[0], predicate_name,
+                                terms[1], result);
+                        slp_vm_push(
+                            vm, SLP_BOOL_VAL(
+                                    status == SLP_JAVA_HANDLED &&
+                                    result));
+                        continue;
+                    }
+                }
+            }
             switch (instruction) {
         case OP_PUSH_NULL:
             slp_vm_push(vm, SLP_NULL_VAL);
@@ -4964,7 +5183,10 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
                 SLP_IS_OBJ(callee) &&
                 (SLP_OBJ_TYPE(callee) == SLP_OBJ_CLOSURE ||
                  SLP_OBJ_TYPE(callee) == SLP_OBJ_NATIVE ||
-                 SLP_OBJ_TYPE(callee) == SLP_OBJ_CONTINUATION);
+                 SLP_OBJ_TYPE(callee) == SLP_OBJ_CONTINUATION ||
+                 (SLP_OBJ_TYPE(callee) == SLP_OBJ_JAVA_OBJECT &&
+                  vm->java_backend_installed &&
+                  vm->java_backend.call_callable));
             if (!callable) {
                 char message[320];
                 snprintf(
@@ -5509,11 +5731,51 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
         case OP_BRIDGE_REGISTER: {
             uint16_t kw_idx = read_short(current_frame(vm));
             uint16_t name_idx = read_short(current_frame(vm));
+            uint16_t string_idx = read_short(current_frame(vm));
+            uint16_t condition_count =
+                read_short(current_frame(vm));
             SlpValue closure_val = slp_vm_pop(vm);
             SlpObjClosure *cl = SLP_AS_CLOSURE(closure_val);
+            SlpObjClosure **conditions = condition_count > 0
+                ? SLP_ALLOCATE_ARRAY(
+                      vm->allocator, SlpObjClosure*,
+                      condition_count)
+                : NULL;
+            if (condition_count > 0 && !conditions) {
+                slp_vm_runtime_error(vm, "Out of memory.");
+                return SLP_RUNTIME_ERROR;
+            }
+            for (uint16_t index = condition_count;
+                 index > 0; index--) {
+                SlpValue condition_value = slp_vm_pop(vm);
+                if (!SLP_IS_OBJ(condition_value) ||
+                    SLP_OBJ_TYPE(condition_value) !=
+                        SLP_OBJ_CLOSURE) {
+                    SLP_FREE(vm->allocator, conditions);
+                    slp_vm_runtime_error(
+                        vm,
+                        "Invalid predicate environment condition.");
+                    return SLP_RUNTIME_ERROR;
+                }
+                conditions[index - 1] =
+                    SLP_AS_CLOSURE(condition_value);
+            }
             SlpChunk *chunk = current_frame(vm)->closure->function->chunk;
             SlpObjString *kw_str = (SlpObjString*)SLP_AS_OBJ(chunk->constants[kw_idx]);
-            SlpObjString *name_str = (SlpObjString*)SLP_AS_OBJ(chunk->constants[name_idx]);
+            SlpValue name_value = chunk->constants[name_idx];
+            SlpObjString *name_str =
+                SLP_IS_OBJ(name_value) &&
+                        SLP_OBJ_TYPE(name_value) ==
+                            SLP_OBJ_STRING
+                    ? SLP_AS_STRING(name_value)
+                    : NULL;
+            SlpValue string_value = chunk->constants[string_idx];
+            SlpObjString *string_arg =
+                SLP_IS_OBJ(string_value) &&
+                        SLP_OBJ_TYPE(string_value) ==
+                            SLP_OBJ_STRING
+                    ? SLP_AS_STRING(string_value)
+                    : NULL;
             cl->is_inline = strcmp(kw_str->chars, "inline") == 0;
             if (cl->is_inline) {
                 if (cl->identity == vm->next_closure_identity &&
@@ -5539,10 +5801,14 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
             bool handled = false;
             SlpBridgeType *bt = vm->bridge_types;
             while (bt) {
-                if (strcmp(bt->keyword, kw_str->chars) == 0) {
+                if (strcmp(bt->keyword, kw_str->chars) == 0 &&
+                    (condition_count == 0 ||
+                     bt->accepts_condition)) {
                     if (bt->handler) {
                         bt->handler(vm, kw_str->chars, name_str ? name_str->chars : NULL,
-                                    NULL, cl, bt->userdata);
+                                    string_arg ? string_arg->chars : NULL,
+                                    conditions, condition_count,
+                                    cl, bt->userdata);
                     }
                     handled = true;
                     break;
@@ -5555,13 +5821,43 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
                         SLP_OBJ_VAL(name_str), SLP_OBJ_VAL(cl));
                 }
             }
+            SLP_FREE(vm->allocator, conditions);
             break;
         }
-        case OP_IMPORT:
-            read_short(current_frame(vm));
-            read_short(current_frame(vm));
+        case OP_IMPORT: {
+            uint16_t target_index =
+                read_short(current_frame(vm));
+            uint16_t path_index =
+                read_short(current_frame(vm));
+            SlpChunk *chunk = current_frame(vm)
+                                  ->closure->function->chunk;
+            SlpValue target =
+                chunk->constants[target_index];
+            const char *target_name =
+                SLP_IS_OBJ(target) &&
+                        SLP_OBJ_TYPE(target) ==
+                            SLP_OBJ_STRING
+                    ? SLP_AS_STRING(target)->chars
+                    : NULL;
+            const char *source_path = NULL;
+            if (path_index != 0) {
+                SlpValue path =
+                    chunk->constants[path_index];
+                if (SLP_IS_OBJ(path) &&
+                    SLP_OBJ_TYPE(path) ==
+                        SLP_OBJ_STRING)
+                    source_path =
+                        SLP_AS_STRING(path)->chars;
+            }
+            if (target_name &&
+                vm->java_backend_installed &&
+                vm->java_backend.import_class)
+                vm->java_backend.import_class(
+                    vm, target_name, source_path,
+                    vm->java_backend.userdata);
             slp_vm_push(vm, SLP_NULL_VAL);
             break;
+        }
         case OP_BACKTICK: {
             uint16_t idx = read_short(current_frame(vm));
             SlpValue cmd_val = current_frame(vm)->closure->function->chunk->constants[idx];
@@ -5609,8 +5905,26 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
                 slp_vm_push(vm, SLP_NULL_VAL);
                 break;
             }
-            SlpObjClass *class_object = slp_vm_new_class(
-                vm, SLP_AS_STRING(literal)->chars);
+            const char *class_name =
+                SLP_AS_STRING(literal)->chars;
+            if (vm->java_backend_installed &&
+                vm->java_backend.resolve_class) {
+                SlpValue resolved = SLP_NULL_VAL;
+                SlpJavaBackendResult status =
+                    vm->java_backend.resolve_class(
+                        vm, class_name, &resolved,
+                        vm->java_backend.userdata);
+                if (status != SLP_JAVA_UNHANDLED) {
+                    slp_vm_push(
+                        vm,
+                        status == SLP_JAVA_HANDLED
+                            ? resolved
+                            : SLP_NULL_VAL);
+                    break;
+                }
+            }
+            SlpObjClass *class_object =
+                slp_vm_new_class(vm, class_name);
             slp_vm_push(
                 vm, class_object
                     ? SLP_OBJ_VAL(class_object)
@@ -5826,7 +6140,33 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
         case OP_OBJ_EXPR: {
             uint8_t arg_count = read_byte(current_frame(vm));
             SlpValue *base = vm->stack_top - arg_count - 2;
-            SlpValue result;
+            SlpValue result = SLP_NULL_VAL;
+            SlpValue target =
+                dereference_value(base[0]);
+            SlpValue message =
+                dereference_value(base[1]);
+            if (vm->java_backend_installed &&
+                vm->java_backend.invoke &&
+                SLP_IS_OBJ(message) &&
+                SLP_OBJ_TYPE(message) ==
+                    SLP_OBJ_STRING) {
+                SlpJavaBackendResult status =
+                    vm->java_backend.invoke(
+                        vm, target,
+                        SLP_AS_STRING(message)->chars,
+                        base + 2, arg_count,
+                        &result,
+                        vm->java_backend.userdata);
+                if (status != SLP_JAVA_UNHANDLED) {
+                    vm->stack_top = base;
+                    slp_vm_push(
+                        vm,
+                        status == SLP_JAVA_HANDLED
+                            ? result
+                            : SLP_NULL_VAL);
+                    break;
+                }
+            }
             if (call_builtin_object_method(vm, base, arg_count, &result)) {
                 if ((vm->debug_flags & 8) ==
                     8) {
@@ -5885,6 +6225,25 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
             SlpValue a = slp_vm_pop(vm);
             bool result = false;
             bool recognized = true;
+
+            if (vm->java_backend_installed &&
+                vm->java_backend.decide) {
+                SlpJavaBackendResult status =
+                    vm->java_backend.decide(
+                        vm, pred_name->chars, &a, 1,
+                        &result,
+                        vm->java_backend.userdata);
+                if (status != SLP_JAVA_UNHANDLED) {
+                    if (status == SLP_JAVA_HANDLED)
+                        trace_unary_predicate(
+                            vm, pred_name->chars, a, result);
+                    slp_vm_push(
+                        vm, SLP_BOOL_VAL(
+                                status == SLP_JAVA_HANDLED &&
+                                result));
+                    break;
+                }
+            }
 
             if (strcmp(pred_name->chars, "-istrue") == 0) {
                 result = !slp_value_is_falsy(a);
@@ -6004,6 +6363,39 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
             SlpValue a = slp_vm_pop(vm);
             bool result = true;
             bool trace_result = true;
+
+            if (vm->java_backend_installed &&
+                vm->java_backend.decide) {
+                SlpValue terms[] = {a, b};
+                SlpJavaBackendResult status =
+                    vm->java_backend.decide(
+                        vm, pred_name->chars, terms, 2,
+                        &result,
+                        vm->java_backend.userdata);
+                if (status != SLP_JAVA_UNHANDLED) {
+                    if (instruction ==
+                        OP_NEGATED_BINARY_PREDICATE)
+                        result = !result;
+                    if (status == SLP_JAVA_HANDLED) {
+                        char traced_name[260];
+                        const char *name = pred_name->chars;
+                        if (instruction ==
+                            OP_NEGATED_BINARY_PREDICATE) {
+                            snprintf(
+                                traced_name, sizeof(traced_name),
+                                "!%s", pred_name->chars);
+                            name = traced_name;
+                        }
+                        trace_binary_predicate(
+                            vm, a, name, b, result);
+                    }
+                    slp_vm_push(
+                        vm, SLP_BOOL_VAL(
+                                status == SLP_JAVA_HANDLED &&
+                                result));
+                    break;
+                }
+            }
 
             if (strcmp(pred_name->chars, "is") == 0) {
                 result = slp_value_identity_equals(a, b);
@@ -6386,8 +6778,9 @@ SlpResult slp_vm_call(SlpVM *vm, int arg_count, bool has_message) {
     return SLP_OK;
 }
 
-SlpResult slp_vm_call_value(
+static SlpResult call_value_from_host(
     SlpVM *vm, SlpValue callable,
+    const char *message,
     const SlpValue *arguments, int argument_count,
     SlpValue *out_result) {
     if (out_result)
@@ -6415,14 +6808,19 @@ SlpResult slp_vm_call_value(
         (SLP_OBJ_TYPE(callable) !=
              SLP_OBJ_CLOSURE &&
          SLP_OBJ_TYPE(callable) !=
-             SLP_OBJ_NATIVE))
+             SLP_OBJ_NATIVE &&
+         (SLP_OBJ_TYPE(callable) !=
+              SLP_OBJ_JAVA_OBJECT ||
+          !vm->java_backend_installed ||
+          !vm->java_backend.call_callable)))
         return SLP_RUNTIME_ERROR;
 
     ptrdiff_t available =
         (vm->stack + SLP_STACK_MAX) -
         vm->stack_top;
     if (available <
-        (ptrdiff_t)argument_count + 1) {
+        (ptrdiff_t)argument_count +
+            (message ? 2 : 1)) {
         slp_vm_runtime_error(
             vm, "Stack overflow.");
         return SLP_RUNTIME_ERROR;
@@ -6436,13 +6834,22 @@ SlpResult slp_vm_call_value(
         vm->try_handler_count;
 
     slp_vm_push(vm, callable);
+    if (message) {
+        SlpObjString *message_value =
+            slp_vm_copy_cstr(vm, message);
+        if (!message_value) {
+            vm->stack_top = saved_stack_top;
+            return SLP_RUNTIME_ERROR;
+        }
+        slp_vm_push(vm, SLP_OBJ_VAL(message_value));
+    }
     for (int i = 0;
          i < argument_count; i++)
         slp_vm_push(vm, arguments[i]);
 
     SlpResult result =
         slp_vm_call(
-            vm, argument_count, false);
+            vm, argument_count, message != NULL);
     if (result == SLP_OK &&
         vm->stack_top >
             saved_stack_top)
@@ -6464,6 +6871,26 @@ SlpResult slp_vm_call_value(
     vm->stack_top =
         saved_stack_top;
     return result;
+}
+
+SlpResult slp_vm_call_value(
+    SlpVM *vm, SlpValue callable,
+    const SlpValue *arguments, int argument_count,
+    SlpValue *out_result) {
+    return call_value_from_host(
+        vm, callable, NULL, arguments,
+        argument_count, out_result);
+}
+
+SlpResult slp_vm_call_value_message(
+    SlpVM *vm, SlpValue callable,
+    const char *message,
+    const SlpValue *arguments, int argument_count,
+    SlpValue *out_result) {
+    if (!message) return SLP_RUNTIME_ERROR;
+    return call_value_from_host(
+        vm, callable, message, arguments,
+        argument_count, out_result);
 }
 
 SlpResult slp_vm_interpret(SlpVM *vm, const char *source) {
@@ -6724,23 +7151,86 @@ SlpObjClosure *slp_vm_compile_closure_source(
     return closure;
 }
 
-void slp_vm_register_bridge_type(SlpVM *vm, const char *keyword,
+static void register_bridge_type(
+    SlpVM *vm, const char *keyword,
     void (*handler)(SlpVM*, const char*, const char*, const char*,
-                    SlpObjClosure*, void*),
-    void *userdata) {
+                    SlpObjClosure**, size_t, SlpObjClosure*, void*),
+    void *userdata, bool accepts_condition) {
+    if (!vm || !keyword || !keyword[0]) return;
+    for (SlpBridgeType *existing = vm->bridge_types;
+         existing; existing = existing->next) {
+        if (existing->accepts_condition == accepts_condition &&
+            strcmp(existing->keyword, keyword) == 0) {
+            existing->handler = handler;
+            existing->userdata = userdata;
+            return;
+        }
+    }
     SlpBridgeType *bt = SLP_ALLOCATE(vm->allocator, SlpBridgeType);
+    if (!bt) return;
     size_t kw_len = slp_utils_strlen(keyword);
     char *kw_copy = (char*)SLP_MALLOC(vm->allocator, kw_len + 1);
+    if (!kw_copy) {
+        SLP_FREE(vm->allocator, bt);
+        return;
+    }
     slp_utils_strcpy(kw_copy, keyword);
     bt->keyword = kw_copy;
     bt->handler = handler;
     bt->userdata = userdata;
+    bt->accepts_condition = accepts_condition;
     bt->next = vm->bridge_types;
     vm->bridge_types = bt;
 }
 
+void slp_vm_register_bridge_type(SlpVM *vm, const char *keyword,
+    void (*handler)(SlpVM*, const char*, const char*, const char*,
+                    SlpObjClosure**, size_t, SlpObjClosure*, void*),
+    void *userdata) {
+    register_bridge_type(
+        vm, keyword, handler, userdata, false);
+}
+
+void slp_vm_register_predicate_bridge_type(
+    SlpVM *vm, const char *keyword,
+    void (*handler)(SlpVM*, const char*, const char*, const char*,
+                    SlpObjClosure**, size_t, SlpObjClosure*, void*),
+    void *userdata) {
+    register_bridge_type(
+        vm, keyword, handler, userdata, true);
+}
+
+void slp_vm_register_predicate_name(
+    SlpVM *vm, const char *name) {
+    if (!vm || !name || !name[0]) return;
+    for (SlpPredicateName *entry = vm->predicate_names;
+         entry; entry = entry->next)
+        if (strcmp(entry->name, name) == 0)
+            return;
+    SlpPredicateName *entry =
+        SLP_ALLOCATE(vm->allocator, SlpPredicateName);
+    if (!entry) return;
+    size_t length = strlen(name);
+    entry->name = (char*)SLP_MALLOC(
+        vm->allocator, length + 1);
+    if (!entry->name) {
+        SLP_FREE(vm->allocator, entry);
+        return;
+    }
+    memcpy(entry->name, name, length + 1);
+    entry->next = vm->predicate_names;
+    vm->predicate_names = entry;
+}
+
 void slp_vm_register_native(SlpVM *vm, const char *name, SlpNativeFn fn) {
     define_native(vm, name, fn);
+}
+
+void slp_vm_register_named_native(
+    SlpVM *vm, const char *name,
+    SlpNamedNativeFn fn, void *userdata) {
+    if (!vm || !name || !fn) return;
+    define_named_native(vm, name, fn, userdata);
 }
 
 void slp_vm_register_native_raw(

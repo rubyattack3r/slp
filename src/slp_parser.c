@@ -957,9 +957,15 @@ static SlpASTNode *bridge(SlpParser *parser, SlpASTNode *left,
       slp_lexer_copy_lexeme(&parser->lexer, &keyword);
   node->as.env_bridge.identifier = NULL;
   node->as.env_bridge.string = NULL;
+  node->as.env_bridge.condition = NULL;
   node->as.env_bridge.body = NULL;
 
-  if (match(parser, SLP_TOKEN_ID)) {
+  if (match(parser, SLP_TOKEN_LEFT_PAREN)) {
+    node->as.env_bridge.condition = expression(parser);
+    consume(
+        parser, SLP_TOKEN_RIGHT_PAREN,
+        "Expect ')' after predicate environment condition.");
+  } else if (match(parser, SLP_TOKEN_ID)) {
     node->as.env_bridge.identifier =
         slp_lexer_copy_lexeme(&parser->lexer, &parser->previous);
   }
@@ -1025,6 +1031,7 @@ static SlpASTNode *block_expr(SlpParser *parser, SlpASTNode *left,
   node->as.env_bridge.keyword = NULL;
   node->as.env_bridge.identifier = NULL;
   node->as.env_bridge.string = NULL;
+  node->as.env_bridge.condition = NULL;
 
   SlpASTNode *body = allocate_node(parser, SLP_AST_BLOCK);
   body->as.block.capacity = 8;
@@ -1081,6 +1088,7 @@ ParseRule rules[] = {
     [SLP_TOKEN_GE] = {NULL, binary, PREC_COMPARISON},
     [SLP_TOKEN_LESS] = {NULL, binary, PREC_COMPARISON},
     [SLP_TOKEN_LE] = {NULL, binary, PREC_COMPARISON},
+    /* Registered infix identifiers are promoted in parse_precedence. */
     [SLP_TOKEN_ID] = {identifier, NULL, PREC_NONE},
     [SLP_TOKEN_STRING] = {string_val, NULL, PREC_NONE},
     [SLP_TOKEN_LITERAL] = {string_val, NULL, PREC_NONE},
@@ -1197,10 +1205,22 @@ static SlpASTNode *parse_precedence_inner(SlpParser *parser,
     slp_string_buffer_free(&buffer);
   }
 
-  while (!parser->had_error &&
-         precedence <= get_rule(parser->current.type)->precedence) {
+  while (!parser->had_error) {
+    bool custom_predicate = false;
+    if (parser->current.type == SLP_TOKEN_ID) {
+      SlpLexer lookahead = parser->lexer;
+      SlpToken right = slp_lexer_scan_token(&lookahead);
+      custom_predicate =
+          get_rule(right.type)->prefix != NULL;
+    }
+    ParsePrecedence current_precedence = custom_predicate
+        ? PREC_EQUALITY
+        : get_rule(parser->current.type)->precedence;
+    if (precedence > current_precedence) break;
     advance(parser);
-    ParseFn infix_rule = get_rule(parser->previous.type)->infix;
+    ParseFn infix_rule = custom_predicate
+        ? binary
+        : get_rule(parser->previous.type)->infix;
     if (infix_rule != NULL)
       expr = infix_rule(parser, expr, canAssign);
   }
@@ -1542,17 +1562,32 @@ static SlpASTNode *declaration(SlpParser *parser) {
     return import_statement(parser);
   }
 
-  // Generic Bridge Detection: ID [ID|STRING|LITERAL]? {
+  // Generic Bridge Detection: ID [ID|STRING|LITERAL]? {. Predicate
+  // environments use ID (condition) {. Looking through the balanced
+  // condition permits a Loadable and its dependent syntax to share one
+  // compilation unit without reclassifying ordinary function calls.
   if (check(parser, SLP_TOKEN_ID)) {
-    const char *saved_current = parser->lexer.current;
-    int saved_line = parser->lexer.line;
-    SlpToken next = slp_lexer_scan_token(&parser->lexer);
-    parser->lexer.current = saved_current;
-    parser->lexer.line = saved_line;
-
+    SlpLexer lookahead = parser->lexer;
+    SlpToken next = slp_lexer_scan_token(&lookahead);
+    bool predicate_environment = false;
+    if (next.type == SLP_TOKEN_LEFT_PAREN) {
+      int depth = 1;
+      while (depth > 0) {
+        SlpToken token = slp_lexer_scan_token(&lookahead);
+        if (token.type == SLP_TOKEN_EOF ||
+            token.type == SLP_TOKEN_ERROR)
+          break;
+        if (token.type == SLP_TOKEN_LEFT_PAREN) depth++;
+        if (token.type == SLP_TOKEN_RIGHT_PAREN) depth--;
+      }
+      if (depth == 0)
+        predicate_environment =
+            slp_lexer_scan_token(&lookahead).type ==
+            SLP_TOKEN_LEFT_BRACE;
+    }
     if (next.type == SLP_TOKEN_ID || next.type == SLP_TOKEN_STRING ||
         next.type == SLP_TOKEN_LITERAL ||
-        next.type == SLP_TOKEN_LEFT_BRACE) {
+        next.type == SLP_TOKEN_LEFT_BRACE || predicate_environment) {
       advance(parser); // Consume the keyword identifier
       return bridge(parser, NULL, false);
     }

@@ -90,6 +90,10 @@ SlpResult slp_callable_call(
     SlpCallable *callable,
     const SlpValue *arguments, int argument_count,
     SlpValue *out_result);
+SlpResult slp_callable_call_message(
+    SlpCallable *callable, const char *message,
+    const SlpValue *arguments, int argument_count,
+    SlpValue *out_result);
 
 /* VM-owned collection helpers for embedding code. */
 SlpObjArray *slp_array_new(SlpVM *vm);

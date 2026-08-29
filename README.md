@@ -2,9 +2,10 @@
 
 SLP is a small, native C99 implementation of the
 [Sleep programming language](https://sleep.dashnine.org/) designed for
-embedding in C applications. It has no external runtime dependencies and does
-not include a JVM, so Java classes, JARs, and `Loadable` extensions are outside
-its scope.
+embedding in C applications. The core library has no external runtime
+dependencies and does not require a JVM. Applications that need Java classes,
+JARs, or existing Sleep extensions can add the optional JVM backend; the
+default library and tools remain Java-free.
 
 ## Build
 
@@ -137,7 +138,7 @@ The supported `slp_args_unpack()` format codes are:
 | `b` | `bool *` | Reads Sleep truthiness. |
 | `O` | `SlpValue *` | Reads a generic Sleep value. |
 | `O!` | `SlpObjType`, typed pointer | Reads an array or hash of the requested type. |
-| optional marker | — | Makes all following arguments optional. |
+| <code>&#124;</code> | — | Makes all following arguments optional. |
 
 Whitespace in the format string is ignored. Use a vertical bar (`|`) to make
 the remaining arguments optional. For example:
@@ -150,6 +151,52 @@ slp_args_unpack(
 
 See `tests/test_embed.cpp` and `tests/test_embed_callable.cpp` for complete,
 working examples.
+
+## Optional JVM backend
+
+The optional backend under `extensions/jvm/` lets an embedded application load
+Java classes, JARs, and existing Sleep `Loadable` extensions. It dynamically
+loads a JVM selected by the application and is not included in the default
+`make` build or `libslp.a`.
+
+Build it and run the Java integration test with:
+
+```sh
+nix develop .#jvm -c make test-jvm
+```
+
+To test compatibility with existing Sleep extensions, provide the official
+Sleep runtime JAR:
+
+```sh
+nix develop .#jvm -c make test-jvm-loadable \
+    SLEEP_JAR=/path/to/sleep.jar
+```
+
+Applications can ship a platform-specific JVM beside their executable, so the
+host does not need Java installed:
+
+```text
+application/
+├── application-binary
+└── runtime/
+    ├── bin/ or lib/           JVM runtime files
+    └── lib/
+        ├── slp-jvm-bridge.jar
+        └── sleep.jar          only needed for Sleep Loadables
+```
+
+Create this directory from a JDK with:
+
+```sh
+JAVA_HOME=/path/to/jdk \
+SLP_SLEEP_JAR=/path/to/sleep.jar \
+    scripts/package-jvm-runtime.sh release-root
+```
+
+Omit `SLP_SLEEP_JAR` when the application does not need Sleep Loadables. See
+the [JVM extension guide](extensions/jvm/README.md) for the embedding API,
+supported interoperability, and platform requirements.
 
 ## Amalgamation
 
@@ -247,12 +294,13 @@ make test-amalgamation
 - `src/` — parser, compiler, VM, values, and garbage collector
 - `src/platform/regex/` — bundled C99 Windows regex compatibility backend
 - `extensions/stdlib/` — standard Sleep functions
+- `extensions/jvm/` — optional dynamically loaded JVM backend
 - `tools/` — interpreter, formatter, disassembler, and benchmark
 - `tests/` — unit tests and reference fixtures
 
 ## License
 
-SLP's original C implementation is available under the
+The SLP C implementation in this repository is available under the
 [MIT License](LICENSE). The interpreter includes Bestline, and Windows builds
 include a vendored TRE-derived regular expression backend. Their provenance,
 copyright, and BSD-style license terms are provided in

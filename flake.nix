@@ -18,6 +18,13 @@
             zig
           ];
         };
+        jvm = pkgs.mkShell {
+          packages = with pkgs; [
+            gnumake
+            zig
+            jdk_headless
+          ];
+        };
       });
     };
 }

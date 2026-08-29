@@ -48,14 +48,81 @@ typedef void (*SlpVMWriteFn)(void *ud, const char *text);
 
 typedef struct SlpBridgeType SlpBridgeType;
 typedef struct SlpCallable SlpCallable;
+typedef struct SlpPredicateName SlpPredicateName;
+
+#define SLP_JAVA_BACKEND_ABI_VERSION 2u
+
+typedef enum {
+    SLP_JAVA_UNHANDLED,
+    SLP_JAVA_HANDLED,
+    /* The provider reported the failure through the VM's error channel. */
+    SLP_JAVA_FAILED
+} SlpJavaBackendResult;
+
+/*
+ * Optional Java interoperability provider.
+ *
+ * The core copies this table into SlpVM and never depends on JNI types. A
+ * provider may therefore use a bundled JVM, an existing host JVM, or another
+ * implementation without changing the portable build. Callback allocations
+ * that belong to SLP must continue to use vm->allocator.
+ */
+typedef struct {
+    uint32_t abi_version;
+    void *userdata;
+    SlpJavaBackendResult (*import_class)(
+        SlpVM *vm, const char *target,
+        const char *source_path, void *userdata);
+    SlpJavaBackendResult (*resolve_class)(
+        SlpVM *vm, const char *name,
+        SlpValue *out_class, void *userdata);
+    SlpJavaBackendResult (*invoke)(
+        SlpVM *vm, SlpValue target,
+        const char *message,
+        const SlpValue *arguments, int argument_count,
+        SlpValue *out_result, void *userdata);
+    /* Optional official Sleep Predicate and Operator bridge dispatch. */
+    SlpJavaBackendResult (*decide)(
+        SlpVM *vm, const char *predicate,
+        const SlpValue *terms, int term_count,
+        bool *out_result, void *userdata);
+    SlpJavaBackendResult (*operate)(
+        SlpVM *vm, const char *operator_name,
+        const SlpValue *terms, int term_count,
+        SlpValue *out_result, void *userdata);
+    /* Invokes a provider-backed Java callable such as SleepClosure. */
+    SlpJavaBackendResult (*call_callable)(
+        SlpVM *vm, SlpValue callable,
+        const char *message,
+        const SlpValue *arguments, int argument_count,
+        SlpValue *out_result, void *userdata);
+    /* Optional stdlib use() implementation; arguments retain source order. */
+    SlpJavaBackendResult (*load_extension)(
+        SlpVM *vm,
+        const SlpValue *arguments, int argument_count,
+        SlpValue *out_result, void *userdata);
+    void (*release_object)(
+        SlpVM *vm, void *object_handle, void *userdata);
+    /* Runs while the VM, globals, and retained callables are still valid. */
+    void (*vm_closing)(SlpVM *vm, void *userdata);
+    /* Runs after all SLP heap objects and their Java handles are released. */
+    void (*destroy)(SlpVM *vm, void *userdata);
+} SlpJavaBackend;
 
 struct SlpBridgeType {
     char *keyword;
     void (*handler)(SlpVM *vm, const char *keyword, const char *identifier,
-                    const char *string_arg, SlpObjClosure *closure,
-                    void *userdata);
+                    const char *string_arg,
+                    SlpObjClosure **conditions, size_t condition_count,
+                    SlpObjClosure *closure, void *userdata);
     void *userdata;
+    bool accepts_condition;
     SlpBridgeType *next;
+};
+
+struct SlpPredicateName {
+    char *name;
+    SlpPredicateName *next;
 };
 
 struct SlpVM {
@@ -78,7 +145,11 @@ struct SlpVM {
     SlpObjUpvalue *open_upvalues;
 
     SlpBridgeType *bridge_types;
+    SlpPredicateName *predicate_names;
     SlpObjHash *natives;
+
+    SlpJavaBackend java_backend;
+    bool java_backend_installed;
 
     size_t bytes_allocated;
     size_t next_gc_threshold;
@@ -121,6 +192,7 @@ struct SlpVM {
     SlpObjIOHandle *console_handle;
     uint64_t next_closure_identity;
     uint64_t next_proxy_identity;
+    uint64_t next_bridge_identity;
     void *user_data;
 };
 
@@ -148,6 +220,11 @@ SlpResult slp_vm_call_value(
     SlpVM *vm, SlpValue callable,
     const SlpValue *arguments, int argument_count,
     SlpValue *out_result);
+SlpResult slp_vm_call_value_message(
+    SlpVM *vm, SlpValue callable,
+    const char *message,
+    const SlpValue *arguments, int argument_count,
+    SlpValue *out_result);
 
 void slp_vm_push(SlpVM *vm, SlpValue value);
 SlpValue slp_vm_pop(SlpVM *vm);
@@ -162,6 +239,9 @@ SlpObjHash *slp_vm_new_hash(SlpVM *vm);
 SlpObjJavaObject *slp_vm_new_java_object(
     SlpVM *vm, const char *class_name,
     SlpJavaObjectKind kind);
+SlpObjJavaObject *slp_vm_new_java_reference(
+    SlpVM *vm, const char *class_name,
+    SlpJavaObjectKind kind, void *backend_handle);
 SlpObjIOHandle *slp_vm_get_console_handle(SlpVM *vm);
 SlpValue slp_vm_new_error(
     SlpVM *vm, const char *class_name,
@@ -179,6 +259,10 @@ bool slp_vm_hash_contains(SlpVM *vm, SlpObjHash *hash, SlpValue key);
 bool slp_vm_hash_set(
     SlpVM *vm, SlpObjHash *hash, SlpValue key, SlpValue value);
 bool slp_vm_hash_delete(SlpVM *vm, SlpObjHash *hash, SlpValue key);
+bool slp_vm_set_global_value(
+    SlpVM *vm, const char *name, SlpValue value);
+bool slp_vm_delete_global_value(
+    SlpVM *vm, const char *name);
 int slp_vm_regex_find(SlpVM *vm, const char *text, const char *pattern,
                       int start, bool full_match, int *match_end);
 SlpObjArray *slp_vm_regex_matches(SlpVM *vm);
@@ -187,11 +271,26 @@ SlpObjArray *slp_vm_profile_statistics(
 
 void slp_vm_register_bridge_type(SlpVM *vm, const char *keyword,
     void (*handler)(SlpVM*, const char*, const char*, const char*,
-                    SlpObjClosure*, void*),
+                    SlpObjClosure**, size_t, SlpObjClosure*, void*),
     void *userdata);
+void slp_vm_register_predicate_bridge_type(
+    SlpVM *vm, const char *keyword,
+    void (*handler)(SlpVM*, const char*, const char*, const char*,
+                    SlpObjClosure**, size_t, SlpObjClosure*, void*),
+    void *userdata);
+void slp_vm_register_predicate_name(
+    SlpVM *vm, const char *name);
 void slp_vm_register_native(SlpVM *vm, const char *name, SlpNativeFn fn);
+/* Provider callables may need both the registered name and provider state. */
+void slp_vm_register_named_native(
+    SlpVM *vm, const char *name,
+    SlpNamedNativeFn fn, void *userdata);
 void slp_vm_register_native_raw(
     SlpVM *vm, const char *name, SlpNativeFn fn);
+
+bool slp_vm_install_java_backend(
+    SlpVM *vm, const SlpJavaBackend *backend);
+bool slp_vm_has_java_backend(const SlpVM *vm);
 
 void slp_vm_flag_error(SlpVM *vm, SlpValue error);
 SlpValue slp_vm_check_error(SlpVM *vm);

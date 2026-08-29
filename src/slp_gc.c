@@ -284,6 +284,19 @@ static void trace_references(SlpVM *vm) {
 
 static void free_obj_contents(SlpVM *vm, SlpObj *obj) {
     switch (obj->type) {
+    case SLP_OBJ_JAVA_OBJECT: {
+        SlpObjJavaObject *java_object =
+            (SlpObjJavaObject*)obj;
+        if (java_object->backend_handle &&
+            vm->java_backend_installed &&
+            vm->java_backend.release_object) {
+            vm->java_backend.release_object(
+                vm, java_object->backend_handle,
+                vm->java_backend.userdata);
+            java_object->backend_handle = NULL;
+        }
+        break;
+    }
     case SLP_OBJ_ARRAY: {
         SlpObjArray *arr = (SlpObjArray*)obj;
         if (arr->elements) SLP_FREE(vm->allocator, arr->elements);

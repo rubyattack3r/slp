@@ -175,11 +175,12 @@ struct SlpASTNode {
       size_t arg_count;
     } obj_expr;
 
-    // Environment Bridge (keyword identifier string block)
+    // Environment Bridge (keyword identifier/string/condition block)
     struct {
       const char *keyword;
       const char *identifier;
       const char *string;
+      struct SlpASTNode *condition;
       struct SlpASTNode *body;
     } env_bridge;
 
@@ -206,7 +207,12 @@ struct SlpASTNode {
   bool is_rewritten;
 };
 
-typedef struct {
+#ifndef SLP_PARSER_TYPE_DEFINED
+#define SLP_PARSER_TYPE_DEFINED
+typedef struct SlpParser SlpParser;
+#endif
+
+struct SlpParser {
   SlpLexer lexer;
   SlpToken current;
   SlpToken previous;
@@ -217,7 +223,7 @@ typedef struct {
   char error_buffer[256];
   int depth; // recursion-depth guard against stack exhaustion on nested input
   SlpAllocator *allocator;
-} SlpParser;
+};
 
 void slp_parser_init(SlpParser *parser, const char *source,
                         SlpAllocator *allocator);
